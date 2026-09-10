@@ -282,6 +282,130 @@ html, body {
   letter-spacing: 1px;
 }
 
+/* HUD Corner Settings Button & Dropdown */
+#hud-settings-container {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.hud-corner-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(14, 26, 56, 0.85);
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(0, 210, 255, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.hud-corner-btn:hover {
+  transform: scale(1.1) rotate(30deg);
+  border-color: var(--arcade-cyan);
+  box-shadow: 0 0 20px rgba(0, 210, 255, 0.5);
+  background: rgba(20, 36, 75, 0.95);
+}
+
+.hud-settings-dropdown {
+  position: absolute;
+  top: 54px;
+  right: 0;
+  width: 280px;
+  background: linear-gradient(150deg, rgba(16, 30, 64, 0.96), rgba(8, 14, 32, 0.98));
+  backdrop-filter: blur(16px);
+  border: 2px solid rgba(0, 210, 255, 0.3);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 16px;
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+  transform-origin: top right;
+  animation: dropdownPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.hud-settings-dropdown.active {
+  display: flex;
+}
+
+@keyframes dropdownPop {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.hud-dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dropdown-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: var(--arcade-cyan);
+}
+
+.hud-dropdown-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.hud-dropdown-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.hud-dropdown-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hud-setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-setting-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.hud-sens-badge {
+  color: var(--gold);
+  font-weight: 800;
+}
+
 /* Webcam Picture-In-Picture Overlay */
 .webcam-pip {
   position: absolute;

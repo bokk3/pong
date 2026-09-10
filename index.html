@@ -38,16 +38,30 @@
         </div>
       </div>
 
-      <!-- Quick Settings Toolbar (Sensitivity & Camera Toggle) -->
-      <div id="quick-settings">
-        <div class="setting-item">
-          <label for="sensitivity-slider">Sensitivity: <span id="sens-val">1.2x</span></label>
-          <input type="range" id="sensitivity-slider" min="0.5" max="2.5" step="0.1" value="1.2" />
-        </div>
-        <button id="webcam-toggle-btn" class="arcade-toggle-btn" title="Toggle Webcam Hand-Swipe Control">
-          <span class="cam-icon">📷</span>
-          <span class="cam-label">Webcam Hand-Swipe <span class="beta-tag">BETA</span></span>
+      <!-- HUD Corner Settings Button & Dropdown -->
+      <div id="hud-settings-container">
+        <button id="hud-settings-btn" class="hud-corner-btn" title="Game Settings & Sensitivity" aria-label="Settings">
+          <span class="settings-gear-icon">⚙️</span>
         </button>
+        <div id="hud-settings-dropdown" class="hud-settings-dropdown">
+          <div class="hud-dropdown-header">
+            <span class="dropdown-title">⚙️ QUICK SETTINGS</span>
+            <button id="hud-settings-close-btn" class="hud-dropdown-close" title="Close Settings">✕</button>
+          </div>
+          <div class="hud-dropdown-body">
+            <div class="hud-setting-row">
+              <div class="hud-setting-label">
+                <span>Paddle Sensitivity</span>
+                <span id="sens-val" class="hud-sens-badge">1.2x</span>
+              </div>
+              <input type="range" id="sensitivity-slider" min="0.5" max="2.5" step="0.1" value="1.2" />
+            </div>
+            <button id="webcam-toggle-btn" class="arcade-toggle-btn" title="Toggle Webcam Hand-Swipe Control">
+              <span class="cam-icon">📷</span>
+              <span class="cam-label">Webcam Hand-Swipe <span class="beta-tag">BETA</span></span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Controls & Spin HUD Helper -->

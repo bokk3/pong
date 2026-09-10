@@ -413,21 +413,21 @@ export class PlayerController {
     this.isServing = true;
 
     this.ball.physics.reset(
-      new THREE.Vector3(0.18, 0.86, 1.55),
-      new THREE.Vector3(0, 1.4, 0),
+      new THREE.Vector3(0.15, 0.88, 1.50),
+      new THREE.Vector3(0, 1.3, 0),
       new THREE.Vector3(0, 0, 0)
     );
 
     setTimeout(() => {
       this.paddle.swing(true, 'TOPSPIN', 1.0);
-      // Clean serve trajectory: bounces on player's table, clears net, lands on CPU table
-      this.ball.physics.velocity.set(0.08, -1.0, -5.6);
-      this.ball.physics.spin.set(22, 0, 0);
+      // Clean serve strike: directs ball to bounce on player's table side around Z ~ 0.95m
+      this.ball.physics.velocity.set(0.06, -1.8, -5.2);
+      this.ball.physics.spin.set(10, 0, 0);
 
       this.eventBus.emit('ball:hit', {
         hitter: 'PLAYER',
         rating: 'GOOD',
-        speed: 5.8,
+        speed: 5.6,
         spin: 'TOPSPIN',
         isSmash: false,
         contactPoint: this.ball.physics.position.clone()

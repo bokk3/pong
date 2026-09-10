@@ -182,6 +182,29 @@ export class HUD {
       this.showMainMenu();
       if (this.onReturnToMenu) this.onReturnToMenu();
     });
+
+    // Corner Quick Settings Toggle
+    const hudSettingsBtn = document.getElementById('hud-settings-btn');
+    const hudSettingsCloseBtn = document.getElementById('hud-settings-close-btn');
+    const hudSettingsDropdown = document.getElementById('hud-settings-dropdown');
+
+    if (hudSettingsBtn && hudSettingsDropdown) {
+      hudSettingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hudSettingsDropdown.classList.toggle('active');
+      });
+
+      hudSettingsCloseBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hudSettingsDropdown.classList.remove('active');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!hudSettingsDropdown.contains(e.target as Node) && e.target !== hudSettingsBtn) {
+          hudSettingsDropdown.classList.remove('active');
+        }
+      });
+    }
   }
 
   private setupGameListeners(): void {

@@ -99,9 +99,21 @@ export class BallPhysics {
         // Elastic rebound on Y
         this.velocity.y = -this.velocity.y * PHYSICS_CONSTANTS.TABLE_RESTITUTION_Y;
 
-        // Ensure minimum bounce velocity for good playability
-        if (Math.abs(this.velocity.y) < 1.2) {
-          this.velocity.y = 1.2;
+        // Ensure reliable net clearance on forward bounces heading towards the net (e.g. serves)
+        const headingToNet = (hitZ > 0 && this.velocity.z < 0) || (hitZ < 0 && this.velocity.z > 0);
+        if (headingToNet && Math.abs(hitZ) > 0.30) {
+          const distToNet = Math.abs(hitZ);
+          const horizSpeed = Math.max(Math.abs(this.velocity.z), 3.0);
+          const tNet = distToNet / horizSpeed;
+          // Target net height (0.9125m) + 0.085m safe clearance margin
+          const minHeightAboveTable = (TABLE_BOUNDS.tableTopY + TABLE_BOUNDS.netHeight + 0.085) - tableTop;
+          const minVyNeeded = (minHeightAboveTable + 0.5 * PHYSICS_CONSTANTS.GRAVITY * tNet * tNet) / tNet;
+          this.velocity.y = Math.max(this.velocity.y, minVyNeeded);
+        } else {
+          // Standard minimum bounce velocity
+          if (Math.abs(this.velocity.y) < 1.35) {
+            this.velocity.y = 1.35;
+          }
         }
 
         // Table surface friction alters horizontal speed based on spin
