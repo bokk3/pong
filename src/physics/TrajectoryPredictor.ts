@@ -69,4 +69,65 @@ export class TrajectoryPredictor {
 
     return { position: pos, time, tableBouncePos };
   }
+
+  /**
+   * Computes the launch velocity vector (vx, vy, vz) to deliver the ball from
+   * startPos to a target position on the opponent's table half while guaranteeing
+   * net clearance and controlled arcade pace.
+   */
+  public static calculateLaunchVelocity(
+    startPos: THREE.Vector3,
+    targetPos: THREE.Vector3,
+    desiredSpeed: number,
+    spin: THREE.Vector3,
+    isSmash: boolean = false
+  ): THREE.Vector3 {
+    const deltaZ = targetPos.z - startPos.z;
+    const directionZ = Math.sign(deltaZ);
+    if (Math.abs(deltaZ) < 0.1) {
+      return new THREE.Vector3(0, 1.5, directionZ * desiredSpeed);
+    }
+
+    // Determine flight time based on desired pace
+    const horizontalSpeed = Math.max(desiredSpeed * 0.88, 4.0);
+    const flightTime = THREE.MathUtils.clamp(
+      Math.abs(deltaZ) / horizontalSpeed,
+      isSmash ? 0.18 : 0.26,
+      isSmash ? 0.28 : 0.42
+    );
+
+    const vz = deltaZ / flightTime;
+    const vx = (targetPos.x - startPos.x) / flightTime;
+
+    // Effective vertical acceleration accounting for gravity and Magnus spin effect
+    const g = PHYSICS_CONSTANTS.GRAVITY;
+    let magnusDown = 0;
+    if (directionZ < 0) {
+      // Moving towards CPU (-Z): positive spin.x pulls downward
+      magnusDown = Math.max(0, spin.x) * Math.abs(vz) * PHYSICS_CONSTANTS.MAGNUS_LIFT;
+    } else {
+      // Moving towards Player (+Z): negative spin.x pulls downward
+      magnusDown = Math.max(0, -spin.x) * Math.abs(vz) * PHYSICS_CONSTANTS.MAGNUS_LIFT;
+    }
+    const gEff = g + magnusDown;
+
+    // Base vertical launch to reach targetPos.y at t = flightTime
+    let vy = (targetPos.y - startPos.y + 0.5 * gEff * flightTime * flightTime) / flightTime;
+
+    // Check net clearance at Z = 0
+    if ((startPos.z > 0 && targetPos.z < 0) || (startPos.z < 0 && targetPos.z > 0)) {
+      const tNet = Math.abs(startPos.z / vz);
+      const netTapeY = TABLE_BOUNDS.tableTopY + TABLE_BOUNDS.netHeight;
+      const clearanceMargin = isSmash ? 0.04 : 0.07;
+      const minNetY = netTapeY + clearanceMargin;
+      const yAtNet = startPos.y + vy * tNet - 0.5 * gEff * tNet * tNet;
+
+      if (yAtNet < minNetY) {
+        vy = (minNetY - startPos.y + 0.5 * gEff * tNet * tNet) / tNet;
+      }
+    }
+
+    return new THREE.Vector3(vx, vy, vz);
+  }
 }
+

@@ -67,9 +67,8 @@ export class StateMachine {
   }
 
   private handleBallHit(shot: ShotInfo): void {
-    if (this.state === 'GAME_OVER') return;
+    if (this.state === 'GAME_OVER' || this.state === 'POINT_SCORED' || this.pointResolved) return;
 
-    this.pointResolved = false;
     this.lastHitter = shot.hitter;
 
     if (shot.hitter === 'PLAYER') {
@@ -82,6 +81,7 @@ export class StateMachine {
     if (this.state === 'SERVE_WAIT' || this.isServicePhase) {
       this.hasBouncedOnStrikerSide = false;
       this.hasBouncedOnReceiverSide = false;
+      this.pointResolved = false;
       this.setState('RALLY');
     } else {
       // Regular rally hit
@@ -168,6 +168,7 @@ export class StateMachine {
   public awardPoint(winner: PlayerId, reason: string): void {
     if (this.pointResolved) return;
     this.pointResolved = true;
+    this.setState('POINT_SCORED');
 
     if (winner === 'PLAYER') {
       this.score.player++;

@@ -84,10 +84,10 @@ export class AIController {
         PADDLE_SPECS.MAX_Y
       );
 
-      // Check if ball is in strike zone
-      if (!this.hasStruckThisTurn && ballPos.z <= -1.45 && ballPos.z >= -2.2) {
+      // Check if ball is in strike zone (forgiving reach for smooth rallies)
+      if (!this.hasStruckThisTurn && ballPos.z <= -1.35 && ballPos.z >= -2.35) {
         const dist = this.paddle.position.distanceTo(ballPos);
-        if (dist < 0.75) {
+        if (dist < 0.95) {
           this.executeAIStrike();
           this.hasStruckThisTurn = true;
         }
@@ -107,55 +107,72 @@ export class AIController {
 
     // Pick shot characteristics based on difficulty
     let spinType: SpinType = 'TOPSPIN';
-    let shotSpeed = 12.0;
+    let shotSpeed = 8.8;
     let isSmash = false;
     let rating: ShotRating = 'GOOD';
+    let targetX = 0;
+    let targetZ = 0.85;
 
     if (this.difficulty === 'novice') {
-      shotSpeed = 10.5;
-      spinType = Math.random() > 0.6 ? 'TOPSPIN' : 'NONE';
-      // Chance of unforced error
-      if (Math.random() < 0.12) {
-        rating = 'LATE';
-      }
+      shotSpeed = 7.5;
+      spinType = Math.random() > 0.7 ? 'TOPSPIN' : 'NONE';
+      // Novice aims comfortably for table center to keep rallies alive
+      targetX = (Math.random() - 0.5) * 0.40;
+      targetZ = 0.80;
+      rating = Math.random() < 0.1 ? 'LATE' : 'GOOD';
     } else if (this.difficulty === 'pro') {
-      shotSpeed = 13.5;
-      spinType = Math.random() > 0.3 ? 'TOPSPIN' : 'BACKSPIN';
-      if (ballPos.y > 1.15 && Math.random() > 0.4) {
+      spinType = Math.random() > 0.35 ? 'TOPSPIN' : 'BACKSPIN';
+      if (ballPos.y > 1.15 && Math.random() > 0.5) {
         isSmash = true;
-        shotSpeed = 20.0;
+        shotSpeed = 13.0;
+        targetZ = 1.12;
+      } else {
+        shotSpeed = 8.8;
+        targetZ = spinType === 'TOPSPIN' ? 0.96 : 0.70;
       }
+      targetX = THREE.MathUtils.clamp((Math.random() - 0.5) * 0.90, -0.52, 0.52);
       rating = 'PERFECT';
     } else {
       // Master
-      shotSpeed = 16.0;
       spinType = 'TOPSPIN';
-      if (ballPos.y > 1.05) {
+      if (ballPos.y > 1.08 && Math.random() > 0.4) {
         isSmash = true;
-        shotSpeed = 25.0;
+        shotSpeed = 14.5;
+        targetZ = 1.18;
+      } else {
+        shotSpeed = 10.5;
+        targetZ = 1.05;
       }
+      targetX = THREE.MathUtils.clamp((Math.random() - 0.5) * 1.15, -0.62, 0.62);
       rating = 'PERFECT';
     }
 
-    this.paddle.swing(isForehand, spinType, isSmash ? 1.6 : 1.1);
+    this.paddle.swing(isForehand, spinType, isSmash ? 1.4 : 1.05);
 
-    // Aim for player table corners (Z positive)
-    // Alternate left/right corner placement
-    const targetCornerX = (Math.random() - 0.5) * (TABLE_BOUNDS.width * 0.75);
-    const launchZ = shotSpeed * 0.9;
-    let launchY = isSmash ? -0.5 : (spinType === 'TOPSPIN' ? 2.6 : 1.9);
-
-    const flightTime = Math.abs((PHYSICS_CONSTANTS.PLAYER_Z_MAX * 0.6) / launchZ);
-    const launchX = (targetCornerX - ballPos.x) / flightTime;
-
-    this.ball.physics.velocity.set(launchX, launchY, launchZ);
-
+    // Spin vector
     const spinVector = new THREE.Vector3();
     if (spinType === 'TOPSPIN') {
-      spinVector.x = isSmash ? -40 : -60; // Topspin when moving +Z pulls down towards player table
+      spinVector.x = isSmash ? -40 : -55; // Pulls down towards player table (+Z)
     } else if (spinType === 'BACKSPIN') {
-      spinVector.x = 40;
+      spinVector.x = 35;
     }
+    spinVector.y = -targetX * 25;
+
+    const targetPos = new THREE.Vector3(
+      targetX,
+      TABLE_BOUNDS.tableTopY + PHYSICS_CONSTANTS.BALL_RADIUS,
+      targetZ
+    );
+
+    const launchVel = TrajectoryPredictor.calculateLaunchVelocity(
+      ballPos,
+      targetPos,
+      shotSpeed,
+      spinVector,
+      isSmash
+    );
+
+    this.ball.physics.velocity.copy(launchVel);
     this.ball.physics.spin.copy(spinVector);
 
     this.eventBus.emit('ball:hit', {
@@ -170,25 +187,25 @@ export class AIController {
 
   public executeServe(): void {
     this.ball.physics.reset(
-      new THREE.Vector3(-0.15, 0.88, -1.55),
-      new THREE.Vector3(0, 1.6, 0),
+      new THREE.Vector3(-0.16, 0.86, -1.55),
+      new THREE.Vector3(0, 1.4, 0),
       new THREE.Vector3(0, 0, 0)
     );
 
     setTimeout(() => {
       this.paddle.swing(true, 'TOPSPIN', 1.0);
-      // Serve bounces on CPU side first (Z ~ -0.95), clears net, bounces on Player side (Z ~ 0.85)
-      this.ball.physics.velocity.set(-0.1, -1.0, 5.5);
-      this.ball.physics.spin.set(-25, 0, 0);
+      // Serve bounces on CPU side first, clears net, lands on player side
+      this.ball.physics.velocity.set(-0.06, -1.0, 5.6);
+      this.ball.physics.spin.set(-22, 0, 0);
 
       this.eventBus.emit('ball:hit', {
         hitter: 'CPU',
         rating: 'GOOD',
-        speed: 5.6,
+        speed: 5.8,
         spin: 'TOPSPIN',
         isSmash: false,
         contactPoint: this.ball.physics.position.clone()
       });
-    }, 160);
+    }, 180);
   }
 }

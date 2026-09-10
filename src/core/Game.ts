@@ -253,6 +253,7 @@ export class Game {
 
     // Point Scored
     this.eventBus.on('point:scored', ({ winner, reason }) => {
+      this.ball.physics.stop();
       this.stadium.celebrate();
       this.sound.playCheer();
 

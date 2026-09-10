@@ -33,6 +33,13 @@ export class PlayerController {
   // Timing & Assisted Position
   private manualOffset = new THREE.Vector2(0, 0);
 
+  // Cooldowns and debouncing
+  private lastSwingTime: number = 0;
+  private readonly SWING_COOLDOWN_MS: number = 220;
+  private lastFlickTime: number = 0;
+  private readonly FLICK_COOLDOWN_MS: number = 180;
+  private isServing: boolean = false;
+
   // Input Buffering (prevents missed swings if user clicks 50-140ms early)
   private bufferedStrike: BufferedStrike | null = null;
   private readonly BUFFER_WINDOW_MS: number = 140;
@@ -116,10 +123,11 @@ export class PlayerController {
     const screenNormX = (e.clientX / window.innerWidth - 0.5) * 2;
     this.manualOffset.x = screenNormX * 0.55 * this.sensitivity;
 
-    // Fast flick gesture detection with adaptive sensitivity threshold
+    // Fast flick gesture detection with adaptive sensitivity threshold and debouncing
     const speed = Math.hypot(this.mouseVelocity.x, this.mouseVelocity.y);
-    const flickThreshold = 420 / Math.max(this.sensitivity, 0.5);
-    if (speed > flickThreshold) {
+    const flickThreshold = 450 / Math.max(this.sensitivity, 0.5);
+    if (speed > flickThreshold && (now - this.lastFlickTime > this.FLICK_COOLDOWN_MS)) {
+      this.lastFlickTime = now;
       this.handleFlickGesture(this.mouseVelocity.y);
     }
   }
@@ -243,46 +251,41 @@ export class PlayerController {
     const ballVel = this.ball.physics.velocity;
     const paddlePos = this.paddle.position;
 
+    const now = performance.now();
+    if (now - this.lastSwingTime < this.SWING_COOLDOWN_MS) {
+      return false;
+    }
+    this.lastSwingTime = now;
+
     // If ball not in motion towards player, still trigger visual swing
     if (!this.ball.physics.isActive || ballVel.z <= 0) {
       this.paddle.swing(ballPos.x >= paddlePos.x, preferredSpin, power);
       return false;
     }
 
-    // If ball is rushing towards player but slightly early (e.g. Z in [1.0, 1.42]), buffer the input!
-    if (ballPos.z >= 1.0 && ballPos.z < 1.42 && ballVel.z > 1.2) {
+    // If ball is rushing towards player but slightly early, buffer the input
+    if (ballPos.z >= 0.95 && ballPos.z < 1.35 && ballVel.z > 0.8) {
       this.bufferedStrike = {
         spin: preferredSpin,
         power,
         isSmash: forceSmash,
         angleBias: manualAngleBias,
-        timestamp: performance.now()
+        timestamp: now
       };
-      // Initiate windup swing immediately for zero visual latency
-      this.paddle.swing(ballPos.x >= paddlePos.x, preferredSpin, power * 0.85);
+      this.paddle.swing(ballPos.x >= paddlePos.x, preferredSpin, power * 0.9);
       return true;
     }
 
-    // If ball is within the live strike zone
-    if (ballPos.z >= 1.38 && ballPos.z <= 2.35) {
+    // If ball is within the live strike zone (forgiving reach and depth)
+    if (ballPos.z >= 1.22 && ballPos.z <= 2.45) {
       const dist = paddlePos.distanceTo(ballPos);
-      if (dist <= 1.0) {
+      if (dist <= 1.35) {
         return this.performStrike(preferredSpin, power, forceSmash, manualAngleBias);
       }
     }
 
-    // Otherwise out of range swing
+    // Out of range swing (whiff) - visual paddle swing only; DO NOT emit ball:hit
     this.paddle.swing(ballPos.x >= paddlePos.x, preferredSpin, power);
-    if (ballPos.z > 2.25) {
-      this.eventBus.emit('ball:hit', {
-        hitter: 'PLAYER',
-        rating: 'LATE',
-        speed: 0,
-        spin: 'NONE',
-        isSmash: false,
-        contactPoint: ballPos.clone()
-      });
-    }
     return false;
   }
 
@@ -295,30 +298,32 @@ export class PlayerController {
     const ballPos = this.ball.physics.position;
     const paddlePos = this.paddle.position;
 
-    // Evaluate Timing Window
+    // Timing Window: generous sweet spot for long, rhythmic rallies
     let rating: ShotRating = 'GOOD';
-    let speedBonus = 1.05;
+    let speedBonus = 1.0;
     let angleBias = manualAngleBias ?? 0;
 
-    // Sweet spot: 1.48 to 1.78
-    if (ballPos.z < 1.48) {
+    // Sweet spot: 1.40 to 1.88
+    if (ballPos.z < 1.40) {
       rating = 'EARLY';
-      angleBias = manualAngleBias ?? (paddlePos.x > 0 ? -0.35 : 0.35);
-      speedBonus = 0.96;
-    } else if (ballPos.z > 1.78) {
+      // Early timing pulls cross-court
+      angleBias = manualAngleBias ?? (paddlePos.x > 0 ? -0.40 : 0.40);
+      speedBonus = 0.98;
+    } else if (ballPos.z > 1.88) {
       rating = 'LATE';
-      angleBias = manualAngleBias ?? (paddlePos.x > 0 ? 0.32 : -0.32);
-      speedBonus = 0.92;
+      // Late timing sends shot down-the-line
+      angleBias = manualAngleBias ?? (paddlePos.x > 0 ? 0.35 : -0.35);
+      speedBonus = 0.95;
     } else {
       rating = 'PERFECT';
-      speedBonus = 1.30;
+      speedBonus = 1.15;
       angleBias = manualAngleBias ?? ((Math.random() - 0.5) * 0.08);
     }
 
-    const isSmash = forceSmash || (ballPos.y > 1.08 && power > 1.25);
+    const isSmash = forceSmash || (ballPos.y > 1.10 && power > 1.25 && ballPos.z < 1.85);
     if (isSmash) {
       rating = 'SMASH';
-      speedBonus = 1.65;
+      speedBonus = 1.35;
     }
 
     const isForehand = ballPos.x >= paddlePos.x - 0.05;
@@ -337,37 +342,56 @@ export class PlayerController {
   ): void {
     const ballPos = this.ball.physics.position;
 
-    let targetX = THREE.MathUtils.clamp(
-      -ballPos.x * 0.65 + angleBias * TABLE_BOUNDS.halfWidth,
-      -TABLE_BOUNDS.halfWidth * 0.88,
-      TABLE_BOUNDS.halfWidth * 0.88
-    );
-
-    const baseSpeed = isSmash ? 24.5 : 14.0 * powerMultiplier;
-    const launchZ = -(baseSpeed * 0.9);
-
-    let launchY = 2.4;
-    if (isSmash) {
-      launchY = -0.7;
-    } else if (spinType === 'TOPSPIN') {
-      launchY = 2.8;
-    } else if (spinType === 'BACKSPIN') {
-      launchY = 1.75;
+    // Calculate target landing position on CPU table (Z in [-1.37, 0])
+    let targetX: number;
+    if (rating === 'EARLY') {
+      targetX = ballPos.x > 0 ? -0.42 : 0.42;
+    } else if (rating === 'LATE') {
+      targetX = ballPos.x > 0 ? 0.38 : -0.38;
+    } else {
+      targetX = THREE.MathUtils.clamp(
+        -ballPos.x * 0.35 + angleBias * TABLE_BOUNDS.halfWidth * 0.75,
+        -0.58,
+        0.58
+      );
     }
 
-    const flightTime = Math.abs((PHYSICS_CONSTANTS.CPU_Z_MIN * 0.6) / launchZ);
-    const launchX = (targetX - ballPos.x) / flightTime;
+    // Target depth on CPU table
+    let targetZ = -0.88;
+    if (isSmash) {
+      targetZ = -1.15;
+    } else if (spinType === 'TOPSPIN') {
+      targetZ = -1.02; // Deep dipping topspin
+    } else if (spinType === 'BACKSPIN') {
+      targetZ = -0.65; // Shorter floating backspin
+    }
 
-    this.ball.physics.velocity.set(launchX, launchY, launchZ);
+    // Controlled arcade pace (7.4 to 10.8 m/s for rallies; 13.5 m/s for smashes)
+    const baseSpeed = isSmash ? 13.5 : THREE.MathUtils.clamp(8.6 * powerMultiplier, 7.4, 10.8);
 
     const spinVector = new THREE.Vector3();
     if (spinType === 'TOPSPIN' || isSmash) {
-      spinVector.x = isSmash ? 45 : 70;
+      spinVector.x = isSmash ? 45 : 60;
     } else if (spinType === 'BACKSPIN') {
-      spinVector.x = -50;
+      spinVector.x = -40;
     }
+    spinVector.y = -angleBias * 30;
 
-    spinVector.y = -angleBias * 40;
+    const targetPos = new THREE.Vector3(
+      targetX,
+      TABLE_BOUNDS.tableTopY + PHYSICS_CONSTANTS.BALL_RADIUS,
+      targetZ
+    );
+
+    const launchVel = TrajectoryPredictor.calculateLaunchVelocity(
+      ballPos,
+      targetPos,
+      baseSpeed,
+      spinVector,
+      isSmash
+    );
+
+    this.ball.physics.velocity.copy(launchVel);
     this.ball.physics.spin.copy(spinVector);
 
     this.eventBus.emit('ball:hit', {
@@ -385,25 +409,33 @@ export class PlayerController {
   }
 
   public executeServe(): void {
+    if (this.isServing) return;
+    this.isServing = true;
+
     this.ball.physics.reset(
-      new THREE.Vector3(0.15, 0.88, 1.55),
-      new THREE.Vector3(0, 1.6, 0),
+      new THREE.Vector3(0.18, 0.86, 1.55),
+      new THREE.Vector3(0, 1.4, 0),
       new THREE.Vector3(0, 0, 0)
     );
 
     setTimeout(() => {
       this.paddle.swing(true, 'TOPSPIN', 1.0);
-      this.ball.physics.velocity.set(0.1, -1.0, -5.5);
-      this.ball.physics.spin.set(25, 0, 0);
+      // Clean serve trajectory: bounces on player's table, clears net, lands on CPU table
+      this.ball.physics.velocity.set(0.08, -1.0, -5.6);
+      this.ball.physics.spin.set(22, 0, 0);
 
       this.eventBus.emit('ball:hit', {
         hitter: 'PLAYER',
         rating: 'GOOD',
-        speed: 5.6,
+        speed: 5.8,
         spin: 'TOPSPIN',
         isSmash: false,
         contactPoint: this.ball.physics.position.clone()
       });
-    }, 160);
+
+      setTimeout(() => {
+        this.isServing = false;
+      }, 500);
+    }, 180);
   }
 }
