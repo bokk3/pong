@@ -26,15 +26,19 @@ export class NetworkManager {
   public remoteUsername: string = 'Opponent';
 
   public isConnected: boolean = false;
+  public isSearching: boolean = false;
   public pingMs: number = 0;
   private pingInterval: number | null = null;
   private presenceInterval: number | null = null;
+  private broadcastChannel: BroadcastChannel | null = null;
+  private isHandshakeComplete: boolean = false;
 
   public onMessageReceived: ((msg: NetworkMessage) => void) | null = null;
 
   private constructor() {
     this.eventBus = EventBus.get();
     this.loadSavedUsername();
+    this.setupBroadcastChannel();
     this.startPresenceReporting();
   }
 
@@ -65,14 +69,58 @@ export class NetworkManager {
     localStorage.setItem('spinpong_username', this.localUsername);
   }
 
+  private setupBroadcastChannel(): void {
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        this.broadcastChannel = new BroadcastChannel('spinpong_p2p_channel');
+        this.broadcastChannel.onmessage = async (event) => {
+          const data = event.data;
+          if (data?.type === 'SEARCHING' && this.isSearching && !this.isConnected && this.peer?.open) {
+            const remotePeerId = data.peerId as string;
+            // Avoid connecting to self
+            if (remotePeerId && remotePeerId !== this.peer.id) {
+              // Tie-breaker: lexicographically greater peerId initiates the connection as CLIENT
+              if (this.peer.id > remotePeerId) {
+                console.log('[NetworkManager] Multi-tab local peer found:', remotePeerId);
+                await this.connectToPeer(remotePeerId);
+              }
+            }
+          }
+        };
+      } catch (err) {
+        console.warn('[NetworkManager] BroadcastChannel not supported:', err);
+      }
+    }
+  }
+
+  public broadcastLocalSearch(): void {
+    if (this.broadcastChannel && this.peer?.open) {
+      this.broadcastChannel.postMessage({
+        type: 'SEARCHING',
+        peerId: this.peer.id,
+        username: this.localUsername
+      });
+    }
+  }
+
   public async initPeer(customRoomId?: string): Promise<string> {
-    if (this.peer && !this.peer.destroyed) {
-      return this.peer.id;
+    const cleanCustom = customRoomId 
+      ? customRoomId.trim().toLowerCase().replace(PEER_PREFIX, '').replace(/[^a-z0-9]/g, '')
+      : undefined;
+
+    // If peer is already open and valid
+    if (this.peer && !this.peer.destroyed && this.peer.open) {
+      const currentClean = this.peer.id.replace(PEER_PREFIX, '');
+      if (!cleanCustom || currentClean === cleanCustom) {
+        return currentClean;
+      }
+      this.peer.destroy();
+      this.peer = null;
     }
 
     return new Promise((resolve, reject) => {
-      const generatedId = customRoomId 
-        ? `${PEER_PREFIX}${customRoomId.toLowerCase()}` 
+      const generatedId = cleanCustom 
+        ? `${PEER_PREFIX}${cleanCustom}` 
         : `${PEER_PREFIX}${Math.random().toString(36).substring(2, 7)}`;
 
       this.peer = new Peer(generatedId, {
@@ -82,7 +130,8 @@ export class NetworkManager {
 
       this.peer.on('open', (id) => {
         this.setupIncomingConnectionHandler();
-        resolve(id.replace(PEER_PREFIX, ''));
+        const cleanId = id.replace(PEER_PREFIX, '');
+        resolve(cleanId);
       });
 
       this.peer.on('error', (err: Error & { type?: string }) => {
@@ -108,13 +157,26 @@ export class NetworkManager {
         return;
       }
       this.role = 'HOST';
+      this.isSearching = false;
       this.attachConnection(incomingConn);
     });
   }
 
   public async connectToPeer(roomId: string): Promise<boolean> {
-    const targetPeerId = `${PEER_PREFIX}${roomId.toLowerCase()}`;
+    const cleanRoomId = roomId.trim().toLowerCase().replace(PEER_PREFIX, '').replace(/[^a-z0-9]/g, '');
+    if (!cleanRoomId) return false;
+    const targetPeerId = `${PEER_PREFIX}${cleanRoomId}`;
+
     await this.initPeer();
+    if (!this.peer || !this.peer.open) return false;
+
+    // Do not connect to self
+    if (this.peer.id === targetPeerId) return false;
+
+    if (this.conn) {
+      try { this.conn.close(); } catch {}
+      this.conn = null;
+    }
 
     return new Promise((resolve) => {
       const outgoing = this.peer!.connect(targetPeerId, {
@@ -125,13 +187,14 @@ export class NetworkManager {
 
       const timeout = setTimeout(() => {
         if (!this.isConnected) {
-          outgoing.close();
+          try { outgoing.close(); } catch {}
           resolve(false);
         }
-      }, 5000);
+      }, 4000);
 
       outgoing.on('open', () => {
         clearTimeout(timeout);
+        this.isSearching = false;
         this.attachConnection(outgoing);
         resolve(true);
       });
@@ -145,17 +208,19 @@ export class NetworkManager {
 
   private attachConnection(conn: DataConnection): void {
     this.conn = conn;
+    this.isHandshakeComplete = false;
 
-    conn.on('open', () => {
+    const onOpen = () => {
       this.isConnected = true;
       this.startPingHeartbeat();
 
-      // Handshake
+      // Send initial handshake
       this.send({
         type: 'HANDSHAKE',
         username: this.localUsername
       });
 
+      // Emit connected status
       this.eventBus.emit('network:status', {
         status: 'connected',
         role: this.role,
@@ -163,7 +228,13 @@ export class NetworkManager {
       });
 
       this.reportPresence('playing');
-    });
+    };
+
+    if (conn.open) {
+      onOpen();
+    } else {
+      conn.on('open', onOpen);
+    }
 
     conn.on('data', (data: unknown) => {
       try {
@@ -200,6 +271,14 @@ export class NetworkManager {
 
     if (msg.type === 'HANDSHAKE') {
       this.remoteUsername = msg.username || 'Opponent';
+      if (!this.isHandshakeComplete) {
+        this.isHandshakeComplete = true;
+        // Reply with local username if we are receiver
+        this.send({
+          type: 'HANDSHAKE',
+          username: this.localUsername
+        });
+      }
       this.eventBus.emit('network:status', {
         status: 'connected',
         role: this.role,
@@ -219,7 +298,11 @@ export class NetworkManager {
 
   public send(msg: NetworkMessage): void {
     if (this.conn && this.conn.open) {
-      this.conn.send(JSON.stringify(msg));
+      try {
+        this.conn.send(JSON.stringify(msg));
+      } catch (e) {
+        console.warn('[NetworkManager] Error sending packet:', e);
+      }
     }
   }
 
@@ -241,6 +324,8 @@ export class NetworkManager {
 
   public handleDisconnect(reason: string = 'Disconnected'): void {
     this.isConnected = false;
+    this.isSearching = false;
+    this.isHandshakeComplete = false;
     this.stopPingHeartbeat();
     if (this.conn) {
       try { this.conn.close(); } catch {}
@@ -260,43 +345,34 @@ export class NetworkManager {
   }
 
   /**
-   * Probes candidate peers and selects the one with the lowest ping RTT.
+   * Sequentially probes candidates to establish connection with available challenger.
    */
   public async findBestCandidateMatch(candidates: Array<{ peerId: string; username: string }>): Promise<string | null> {
     if (!candidates || candidates.length === 0) return null;
 
-    let bestPeerId: string | null = null;
-    let lowestPing = Infinity;
+    for (const candidate of candidates) {
+      const cleanId = candidate.peerId.replace(PEER_PREFIX, '');
+      if (this.peer && cleanId === this.peer.id.replace(PEER_PREFIX, '')) {
+        continue;
+      }
 
-    // Connect to candidates concurrently with a 1.2s probing window
-    const probePromises = candidates.map(async (candidate) => {
-      try {
-        const start = performance.now();
-        const connected = await this.connectToPeer(candidate.peerId.replace(PEER_PREFIX, ''));
-        if (connected) {
-          const rtt = performance.now() - start;
-          if (rtt < lowestPing) {
-            lowestPing = rtt;
-            bestPeerId = candidate.peerId.replace(PEER_PREFIX, '');
-          }
-        }
-      } catch {}
-    });
+      console.log('[NetworkManager] Attempting connection to candidate:', cleanId);
+      const connected = await this.connectToPeer(cleanId);
+      if (connected) {
+        console.log('[NetworkManager] Successfully connected to candidate:', cleanId);
+        return cleanId;
+      }
+    }
 
-    await Promise.race([
-      Promise.all(probePromises),
-      new Promise((res) => setTimeout(res, 1200))
-    ]);
-
-    return bestPeerId;
+    return null;
   }
 
-  // --- Cloudflare Pages Presence & Queue Heartbeats ---
+  // --- Presence & Queue Heartbeats ---
   private startPresenceReporting(): void {
     this.reportPresence('menu');
     this.presenceInterval = window.setInterval(() => {
-      this.reportPresence(this.isConnected ? 'playing' : 'menu');
-    }, 12000);
+      this.reportPresence(this.isConnected ? 'playing' : (this.isSearching ? 'searching' : 'menu'));
+    }, 8000);
   }
 
   public stopPresenceReporting(): void {
@@ -308,6 +384,7 @@ export class NetworkManager {
 
   public async reportPresence(status: 'menu' | 'searching' | 'playing' | 'leave'): Promise<{ lookingCount: number; playingCount: number; candidates: CandidatePeer[] } | null> {
     try {
+      // Use actual peerId if peer is initialized
       const peerId = this.peer?.id || `${PEER_PREFIX}anon_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch('/api/presence', {
         method: 'POST',
@@ -328,7 +405,7 @@ export class NetworkManager {
         return data;
       }
     } catch {
-      // Running locally or offline - graceful fallback with friendly simulated presence
+      // Fallback
       this.eventBus.emit('presence:updated', {
         lookingCount: status === 'searching' ? 1 : 0,
         playingCount: status === 'playing' ? 1 : 0

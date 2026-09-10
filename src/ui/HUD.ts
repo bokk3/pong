@@ -95,6 +95,8 @@ export class HUD {
   private currentMode: 'BOT' | 'MULTIPLAYER' = 'BOT';
   private localRematchRequested: boolean = false;
   private remoteRematchRequested: boolean = false;
+  private matchmakingPollTimer: number | null = null;
+  private isStartingMatch: boolean = false;
 
   // Callbacks
   public onStartMatch: ((diff: Difficulty) => void) | null = null;
@@ -314,7 +316,8 @@ export class HUD {
 
     // Join Room Button
     this.joinRoomBtn.addEventListener('click', async () => {
-      const code = this.joinRoomInput.value.trim().toUpperCase();
+      let code = this.joinRoomInput.value.trim().toUpperCase();
+      code = code.replace(/^SP3D-?/i, '').replace(/[^A-Z0-9]/g, '');
       if (!code || code.length < 3) return;
       this.joinRoomBtn.textContent = 'Connecting...';
       this.joinRoomBtn.setAttribute('disabled', 'true');
@@ -461,14 +464,18 @@ export class HUD {
         this.setOpponentName(remoteUsername ? remoteUsername.toUpperCase() : 'OPPONENT');
         this.setPlayerName(this.network.localUsername.toUpperCase());
 
+        if (this.isStartingMatch) return;
+        this.isStartingMatch = true;
+
         setTimeout(() => {
           this.closeMatchmaking();
           this.hideMainMenu();
           if (this.onStartMultiplayerMatch) {
             this.onStartMultiplayerMatch(role || 'CLIENT', remoteUsername || 'Opponent');
           }
-        }, 600);
+        }, 500);
       } else if (status === 'disconnected') {
+        this.isStartingMatch = false;
         this.hudPingBadgeEl.style.display = 'none';
         this.rematchStatusTextEl.textContent = 'Opponent disconnected.';
         this.multiRematchBtn.setAttribute('disabled', 'true');
@@ -511,14 +518,17 @@ export class HUD {
 
   private checkUrlRoomParameter(): void {
     const params = new URLSearchParams(window.location.search);
-    const room = params.get('room');
-    if (room && room.trim().length >= 3) {
-      this.openMatchmaking('friend');
-      this.joinRoomInput.value = room.trim().toUpperCase();
-      this.showCallout(`JOINING ROOM ${room.toUpperCase()}...`, 1500);
-      setTimeout(() => {
-        this.joinRoomBtn.click();
-      }, 300);
+    let room = params.get('room');
+    if (room) {
+      room = room.trim().toUpperCase().replace(/^SP3D-?/i, '').replace(/[^A-Z0-9]/g, '');
+      if (room.length >= 3) {
+        this.openMatchmaking('friend');
+        this.joinRoomInput.value = room;
+        this.showCallout(`JOINING ROOM ${room}...`, 1500);
+        setTimeout(() => {
+          this.joinRoomBtn.click();
+        }, 400);
+      }
     }
   }
 
@@ -539,6 +549,12 @@ export class HUD {
   }
 
   public closeMatchmaking(): void {
+    if (this.matchmakingPollTimer !== null) {
+      clearInterval(this.matchmakingPollTimer);
+      this.matchmakingPollTimer = null;
+    }
+    this.network.isSearching = false;
+    this.isStartingMatch = false;
     this.mmModalEl.classList.remove('active');
     if (!this.network.isConnected) {
       this.network.reportPresence('menu');
@@ -546,29 +562,68 @@ export class HUD {
   }
 
   private async startQuickMatchmaking(): Promise<void> {
-    this.mmStatusTitleEl.textContent = 'Scanning for opponents...';
-    this.mmStatusSubEl.textContent = 'Querying lowest-latency players first';
+    if (this.matchmakingPollTimer !== null) {
+      clearInterval(this.matchmakingPollTimer);
+      this.matchmakingPollTimer = null;
+    }
+
+    this.network.isSearching = true;
+    this.isStartingMatch = false;
+    this.mmStatusTitleEl.textContent = 'Connecting to P2P network...';
+    this.mmStatusSubEl.textContent = 'Initializing PeerJS room...';
     this.mmPingValEl.textContent = '-- ms';
 
-    // 1. Report searching status to edge presence
-    const presenceData = await this.network.reportPresence('searching');
-    const candidates = presenceData?.candidates || [];
+    // 1. Initialize peer FIRST so this.network.peer has its real ID
+    const myCode = await this.network.initPeer();
+    if (!this.mmModalEl.classList.contains('active')) return;
 
-    // 2. If candidate peers are waiting, probe for lowest latency
+    // 2. Announce locally via BroadcastChannel for multi-tab testing
+    this.network.broadcastLocalSearch();
+
+    // 3. Register real peer ID with presence queue
+    this.mmStatusTitleEl.textContent = 'Scanning for opponents...';
+    this.mmStatusSubEl.textContent = 'Looking for active players...';
+    const presenceData = await this.network.reportPresence('searching');
+
+    // 4. Try candidates if any exist
+    const myPeerId = this.network.peer?.id;
+    const candidates = (presenceData?.candidates || []).filter(c => c.peerId !== myPeerId);
+
     if (candidates.length > 0) {
-      this.mmStatusSubEl.textContent = `Testing ping for ${candidates.length} active challengers...`;
-      const bestRoomId = await this.network.findBestCandidateMatch(candidates);
-      if (bestRoomId) {
-        this.mmStatusTitleEl.textContent = 'Match Found!';
-        this.mmStatusSubEl.textContent = 'Connecting to best latency opponent...';
+      this.mmStatusSubEl.textContent = `Found ${candidates.length} candidate(s). Connecting...`;
+      const matched = await this.network.findBestCandidateMatch(candidates);
+      if (matched) {
+        this.mmStatusTitleEl.textContent = 'Opponent Found!';
+        this.mmStatusSubEl.textContent = 'Opening direct WebRTC channel...';
         return;
       }
     }
 
-    // 3. Fallback: Host and wait for challenger
+    // 5. If no candidates, host and poll
     this.mmStatusTitleEl.textContent = 'Waiting for Challenger...';
-    const code = await this.network.initPeer();
-    this.mmStatusSubEl.textContent = `Hosting room [${code.toUpperCase()}]. Probing incoming connections...`;
+    this.mmStatusSubEl.textContent = `Hosting room [${myCode.toUpperCase()}]. Waiting for match...`;
+
+    // Start polling presence while waiting
+    this.matchmakingPollTimer = window.setInterval(async () => {
+      if (this.network.isConnected || !this.mmModalEl.classList.contains('active')) {
+        if (this.matchmakingPollTimer !== null) {
+          clearInterval(this.matchmakingPollTimer);
+          this.matchmakingPollTimer = null;
+        }
+        return;
+      }
+
+      this.network.broadcastLocalSearch();
+      const updated = await this.network.reportPresence('searching');
+      const newCandidates = (updated?.candidates || []).filter(c => c.peerId !== this.network.peer?.id);
+      if (newCandidates.length > 0 && !this.network.isConnected) {
+        const matched = await this.network.findBestCandidateMatch(newCandidates);
+        if (matched && this.matchmakingPollTimer !== null) {
+          clearInterval(this.matchmakingPollTimer);
+          this.matchmakingPollTimer = null;
+        }
+      }
+    }, 2000);
   }
 
   private async startFriendRoomHosting(): Promise<void> {
