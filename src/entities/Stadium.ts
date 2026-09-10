@@ -83,7 +83,7 @@ export class Stadium {
       this.group.add(barrier);
     });
 
-    // 3. Bleachers & Stylized Wii-style Crowd
+    // 3. Bleachers & Stylized Arcade Crowd
     this.buildBleachersAndCrowd();
 
     // 4. Stadium Lighting (Soft Ambient + Spotlights)

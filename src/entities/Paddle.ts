@@ -88,7 +88,7 @@ export class Paddle {
     this.handleMesh.castShadow = true;
     this.group.add(this.handleMesh);
 
-    // 5. Stylized Disembodied Hand / Glove (Wii Sports aesthetic)
+    // 5. Stylized Disembodied Hand / Glove (Arcade aesthetic)
     const handGeo = new THREE.SphereGeometry(0.038, 16, 16);
     const handMat = new THREE.MeshStandardMaterial({
       color: this.playerId === 'PLAYER' ? 0x00d2ff : 0xff5500, // Player Cyan, CPU Orange
