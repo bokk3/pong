@@ -414,13 +414,15 @@ export class Game {
     this.ball.group.visible = visible;
     this.playerPaddle.group.visible = visible;
     this.cpuPaddle.group.visible = visible;
+    this.table.group.visible = visible;
+    this.stadium.group.visible = visible;
   }
 
   private startCurveMatch(isMultiplayer: boolean): void {
     this.gameModeType = 'CURVE';
-    this.setEntitiesVisibility(false);
-    this.curveMode.group.visible = true;
-    this.cameraCtrl.setMode('CURVE');
+    this.setEntitiesVisibility(false); // Hides ping pong table, net, stadium, paddles, and ball
+    this.curveMode.group.visible = true; // Shows plain square 2D arena
+    this.cameraCtrl.setMode('CURVE'); // True 2D top-down view
     this.stateMachine.setState('RALLY'); // Active playing state
 
     const oppName = isMultiplayer ? this.network.remoteUsername : 'BOT (CURVE)';
@@ -428,6 +430,7 @@ export class Game {
     this.sound.playWhistle();
     this.curveMode.startMatch(isMultiplayer);
   }
+
 
   private handleNetworkMessage(msg: NetworkMessage): void {
     // If curve network packet, forward directly to CurveGameMode
@@ -563,19 +566,19 @@ export class Game {
       // Curve Battle simulation loop
       if (this.stateMachine.state !== 'MENU') {
         this.curveMode.update(rawDelta);
-        this.stadium.update(rawDelta);
         this.vfx.update(rawDelta);
       }
 
       this.cameraCtrl.update(
         rawDelta,
-        new THREE.Vector3(0, 0.76, 0),
-        new THREE.Vector3(0, 0.76, 0)
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, 0)
       );
 
       this.renderer.render(this.scene, this.cameraCtrl.camera);
       return;
     }
+
 
     // Classic Pong simulation loop
     const isMatchPoint = this.stateMachine.score.player >= 10 || this.stateMachine.score.cpu >= 10;

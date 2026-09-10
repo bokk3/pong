@@ -36,17 +36,17 @@ export class CameraController {
     this.camera.aspect = aspect;
 
     if (this.currentMode === 'CURVE') {
-      // High isometric / top-down perspective for Achtung die Kurve table surface
+      // Classic 2D Top-Down perspective directly above the square arena
       if (aspect < 1.0) {
-        // Portrait mobile
-        this.defaultFov = 65;
-        this.basePosition.set(0, 3.4, 1.7);
-        this.baseLookAt.set(0, 0.76, 0);
+        // Portrait mobile: raise camera to fit 3.2m width comfortably
+        this.defaultFov = 50;
+        this.basePosition.set(0, 4.8 / aspect, 0);
+        this.baseLookAt.set(0, 0, 0);
       } else {
-        // Landscape desktop
-        this.defaultFov = 52;
-        this.basePosition.set(0, 2.9, 1.8);
-        this.baseLookAt.set(0, 0.76, 0);
+        // Landscape desktop: true top-down perpendicular view
+        this.defaultFov = 48;
+        this.basePosition.set(0, 4.4, 0);
+        this.baseLookAt.set(0, 0, 0);
       }
     } else {
       if (aspect < 1.0) {
@@ -62,6 +62,7 @@ export class CameraController {
         this.baseLookAt.set(0, 0.82, -0.35);
       }
     }
+
 
     this.targetFov = this.defaultFov;
     this.currentFov = this.defaultFov;

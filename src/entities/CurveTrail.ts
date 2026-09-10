@@ -21,9 +21,10 @@ export class CurveTrail {
   private lastPoint: THREE.Vector2 | null = null;
   private yElevation: number;
 
-  constructor(color: number, tableY: number = 0.76) {
+  constructor(color: number, tableY: number = 0.005) {
     this.group = new THREE.Group();
-    this.yElevation = tableY + 0.003; // Just above table top
+    this.yElevation = tableY; // Flat on the 2D arena plane
+
 
     this.positions = new Float32Array(MAX_VERTICES * 3);
     this.geometry = new THREE.BufferGeometry();

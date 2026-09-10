@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { PlayerId } from '../types';
 import { CurveTrail } from '../entities/CurveTrail';
-import { TABLE_BOUNDS } from '../physics/Constants';
 
 export interface CurveConfig {
   speed: number;
@@ -13,29 +12,13 @@ export interface CurveConfig {
 }
 
 const DEFAULT_CONFIG: CurveConfig = {
-  speed: 1.15, // m/s forward speed
-  turnSpeed: 3.2, // rad/s turning rate
+  speed: 1.6, // units/sec forward speed
+  turnSpeed: 3.3, // rad/s turning rate
   gapIntervalMin: 2.2, // seconds between gaps
   gapIntervalMax: 4.2,
   gapDuration: 0.28, // seconds gap lasts
-  headRadius: 0.016 // head collision radius
+  headRadius: 0.024 // head collision radius
 };
-
-// Line segment intersection helper
-function lineIntersects(
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  p3: { x: number; y: number },
-  p4: { x: number; y: number }
-): boolean {
-  const det = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
-  if (Math.abs(det) < 1e-8) return false;
-
-  const lambda = ((p4.y - p3.y) * (p4.x - p1.x) + (p3.x - p4.x) * (p4.y - p1.y)) / det;
-  const gamma = ((p1.y - p2.y) * (p4.x - p1.x) + (p2.x - p1.x) * (p4.y - p1.y)) / det;
-
-  return 0 <= lambda && lambda <= 1 && 0 <= gamma && gamma <= 1;
-}
 
 // Distance from point to line segment
 function distToSegment(
@@ -50,13 +33,17 @@ function distToSegment(
   return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
 }
 
+// Plain Square 2D Arena size: 3.2 x 3.2 square
+export const CURVE_ARENA_SIZE = 3.2;
+export const CURVE_ARENA_HALF = CURVE_ARENA_SIZE / 2;
+
 export class CurveController {
   public id: PlayerId;
   public trail: CurveTrail;
   public isBot: boolean = false;
   public isAlive: boolean = true;
 
-  // Head state on table plane (X, Z)
+  // Head state on arena plane (X, Z)
   public x: number = 0;
   public z: number = 0;
   public angle: number = 0;
@@ -73,41 +60,41 @@ export class CurveController {
   private config: CurveConfig;
   private totalElapsed: number = 0;
 
-  // Table bounds
-  private readonly minX: number;
-  private readonly maxX: number;
-  private readonly minZ: number;
-  private readonly maxZ: number;
+  // Arena bounds (pure square, no obstacles or net)
+  public readonly minX: number;
+  public readonly maxX: number;
+  public readonly minZ: number;
+  public readonly maxZ: number;
 
   constructor(id: PlayerId, color: number, isBot: boolean = false, config: Partial<CurveConfig> = {}) {
     this.id = id;
     this.isBot = isBot;
     this.config = { ...DEFAULT_CONFIG, ...config };
 
-    this.trail = new CurveTrail(color, TABLE_BOUNDS.tableTopY);
+    this.trail = new CurveTrail(color, 0.005);
 
     // Head sphere
-    const headGeo = new THREE.SphereGeometry(this.config.headRadius * 1.3, 16, 16);
+    const headGeo = new THREE.SphereGeometry(this.config.headRadius * 1.25, 16, 16);
     const headMat = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 1.2,
+      emissiveIntensity: 1.3,
       roughness: 0.1,
       metalness: 0.9
     });
     this.headMesh = new THREE.Mesh(headGeo, headMat);
-    this.headMesh.castShadow = true;
-    this.headMesh.position.y = TABLE_BOUNDS.tableTopY + 0.015;
+    this.headMesh.position.y = 0.012;
 
-    // Outer table perimeter boundaries (inset slightly so trail stays on felt)
-    const margin = 0.02;
-    this.minX = -TABLE_BOUNDS.halfWidth + margin;
-    this.maxX = TABLE_BOUNDS.halfWidth - margin;
-    this.minZ = -TABLE_BOUNDS.halfLength + margin;
-    this.maxZ = TABLE_BOUNDS.halfLength - margin;
+    // Outer square boundaries with small safety padding
+    const margin = 0.03;
+    this.minX = -CURVE_ARENA_HALF + margin;
+    this.maxX = CURVE_ARENA_HALF - margin;
+    this.minZ = -CURVE_ARENA_HALF + margin;
+    this.maxZ = CURVE_ARENA_HALF - margin;
 
     this.scheduleNextGap();
   }
+
 
   public reset(spawnX: number, spawnZ: number, spawnAngle: number): void {
     this.x = spawnX;
@@ -193,35 +180,21 @@ export class CurveController {
   }
 
   public checkCollision(
-    prevX: number,
-    prevZ: number,
+    _prevX: number,
+    _prevZ: number,
     currX: number,
     currZ: number,
     opponentTrail?: CurveTrail
   ): boolean {
-    // 1. Table Boundary Collision
+    // 1. Square Boundary Collision
     if (currX <= this.minX || currX >= this.maxX || currZ <= this.minZ || currZ >= this.maxZ) {
       return true;
     }
 
-    // 2. Net obstacle collision (Net sits at Z=0 between -halfWidth and halfWidth)
-    // Curve heads cannot drive right through the solid net center post
     const headRadius = this.config.headRadius;
-    if (Math.abs(currZ) < 0.02 && Math.abs(currX) < TABLE_BOUNDS.halfWidth) {
-      // Allow passing through only if near net extremes or if crossing directly
-      if (lineIntersects(
-        { x: prevX, y: prevZ },
-        { x: currX, y: currZ },
-        { x: -TABLE_BOUNDS.halfWidth, y: 0 },
-        { x: TABLE_BOUNDS.halfWidth, y: 0 }
-      )) {
-        return true;
-      }
-    }
-
     const currPos = { x: currX, y: currZ };
 
-    // 3. Collision against own trail (exclude last 0.22 seconds of trail to avoid self-colliding with head)
+    // 2. Collision against own trail (exclude last 0.22 seconds of trail to avoid self-colliding with head)
     const graceTime = 0.22;
     for (let i = 0; i < this.trail.segments.length; i++) {
       const seg = this.trail.segments[i];
@@ -234,7 +207,7 @@ export class CurveController {
       }
     }
 
-    // 4. Collision against opponent's trail
+    // 3. Collision against opponent's trail
     if (opponentTrail) {
       for (let i = 0; i < opponentTrail.segments.length; i++) {
         const seg = opponentTrail.segments[i];
@@ -251,7 +224,7 @@ export class CurveController {
    * Smart curve Bot AI: casts rays ahead to evaluate free travel distance
    */
   private computeBotSteering(opponentTrail?: CurveTrail): void {
-    const lookAheadDistance = 0.38; // ~35cm lookahead
+    const lookAheadDistance = 0.45; // lookahead distance in arena
     const anglesToTest = [
       { dir: 0 as (-1 | 0 | 1), offset: 0 },
       { dir: -1 as (-1 | 0 | 1), offset: -0.45 },
@@ -274,14 +247,8 @@ export class CurveController {
         const tx = this.x + Math.cos(testAngle) * d;
         const tz = this.z + Math.sin(testAngle) * d;
 
-        // Check boundaries
+        // Check square boundaries
         if (tx <= this.minX || tx >= this.maxX || tz <= this.minZ || tz >= this.maxZ) {
-          hit = true;
-          break;
-        }
-
-        // Check net
-        if (Math.abs(tz) < 0.02) {
           hit = true;
           break;
         }
@@ -296,6 +263,7 @@ export class CurveController {
           }
         }
         if (hit) break;
+
 
         // Check opponent trail
         if (opponentTrail) {

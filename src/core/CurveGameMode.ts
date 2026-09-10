@@ -36,10 +36,58 @@ export class CurveGameMode {
     this.p1 = new CurveController('PLAYER', 0x00f3ff, false);
     this.p2 = new CurveController('CPU', 0xff3b30, true);
 
+    this.buildSquareArena();
+
     this.group.add(this.p1.trail.group);
     this.group.add(this.p1.headMesh);
     this.group.add(this.p2.trail.group);
     this.group.add(this.p2.headMesh);
+  }
+
+  private buildSquareArena(): void {
+    const size = 3.2;
+    const half = size / 2;
+
+    // 1. Dark, crisp matte arena floor (like classic Achtung die Kurve DOS canvas)
+    const floorGeo = new THREE.PlaneGeometry(size, size);
+    const floorMat = new THREE.MeshBasicMaterial({
+      color: 0x070c18, // Deep dark retro navy
+      side: THREE.DoubleSide
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0, 0);
+    this.group.add(floor);
+
+    // 2. Subtle grid lines on the square arena
+    const gridHelper = new THREE.GridHelper(size, 16, 0x1e293b, 0x0f172a);
+    gridHelper.position.y = 0.001;
+    this.group.add(gridHelper);
+
+    // 3. Glowing outer boundary walls (classic Achtung border)
+    const borderMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const wallThick = 0.02;
+    const wallHeight = 0.04;
+
+    // Top wall (+Z)
+    const wallTop = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
+    wallTop.position.set(0, wallHeight / 2, half + wallThick / 2);
+    this.group.add(wallTop);
+
+    // Bottom wall (-Z)
+    const wallBottom = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
+    wallBottom.position.set(0, wallHeight / 2, -half - wallThick / 2);
+    this.group.add(wallBottom);
+
+    // Left wall (-X)
+    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
+    wallLeft.position.set(-half - wallThick / 2, wallHeight / 2, 0);
+    this.group.add(wallLeft);
+
+    // Right wall (+X)
+    const wallRight = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
+    wallRight.position.set(half + wallThick / 2, wallHeight / 2, 0);
+    this.group.add(wallRight);
   }
 
   public startMatch(isMultiplayer: boolean): void {
@@ -63,15 +111,20 @@ export class CurveGameMode {
     this.roundState = 'COUNTDOWN';
     this.countdownTimer = 2.4;
 
-    // Generate balanced random spawn positions on each half of the table
-    // Table bounds: X in [-0.65, 0.65], Z in [-1.2, 1.2]
-    const p1X = (Math.random() - 0.5) * 0.8;
-    const p1Z = 0.5 + Math.random() * 0.5; // Player side (positive Z)
-    const p1Angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8; // Facing towards net
+    // Classic Achtung die Kurve spawn:
+    // Random positions comfortably inside the square (between -1.0 and 1.0), pointing in any random direction
+    const p1X = (Math.random() - 0.5) * 1.8;
+    const p1Z = (Math.random() - 0.5) * 1.8;
+    const p1Angle = Math.random() * Math.PI * 2;
 
-    const p2X = (Math.random() - 0.5) * 0.8;
-    const p2Z = -0.5 - Math.random() * 0.5; // CPU side (negative Z)
-    const p2Angle = Math.PI / 2 + (Math.random() - 0.5) * 0.8; // Facing towards net
+    let p2X = (Math.random() - 0.5) * 1.8;
+    let p2Z = (Math.random() - 0.5) * 1.8;
+    // Ensure players don't spawn right on top of each other
+    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 0.8) {
+      p2X = (Math.random() - 0.5) * 1.8;
+      p2Z = (Math.random() - 0.5) * 1.8;
+    }
+    const p2Angle = Math.random() * Math.PI * 2;
 
     this.p1.reset(p1X, p1Z, p1Angle);
     this.p2.reset(p2X, p2Z, p2Angle);
@@ -83,13 +136,17 @@ export class CurveGameMode {
     this.roundState = 'COUNTDOWN';
     this.countdownTimer = 2.4;
 
-    const p1X = (Math.random() - 0.5) * 0.8;
-    const p1Z = 0.5 + Math.random() * 0.5;
-    const p1Angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+    const p1X = (Math.random() - 0.5) * 1.8;
+    const p1Z = (Math.random() - 0.5) * 1.8;
+    const p1Angle = Math.random() * Math.PI * 2;
 
-    const p2X = (Math.random() - 0.5) * 0.8;
-    const p2Z = -0.5 - Math.random() * 0.5;
-    const p2Angle = Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+    let p2X = (Math.random() - 0.5) * 1.8;
+    let p2Z = (Math.random() - 0.5) * 1.8;
+    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 0.8) {
+      p2X = (Math.random() - 0.5) * 1.8;
+      p2Z = (Math.random() - 0.5) * 1.8;
+    }
+    const p2Angle = Math.random() * Math.PI * 2;
 
     this.p1.reset(p1X, p1Z, p1Angle);
     this.p2.reset(p2X, p2Z, p2Angle);
@@ -105,6 +162,7 @@ export class CurveGameMode {
 
     this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
   }
+
 
   public handleNetworkMessage(msg: NetworkMessage): void {
     if (msg.type === 'CURVE_ROUND_START') {
