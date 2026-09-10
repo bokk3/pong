@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Wii Pong 3D - Arcade Table Tennis</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Outfit:wght@400;600;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- In-Game HUD -->
+    <div id="hud">
+      <!-- Top Scoreboard Bar -->
+      <div id="scoreboard">
+        <div class="score-card player-card" id="player-score-card">
+          <div class="server-indicator" id="player-serve-indicator">SERVE</div>
+          <div class="player-name">YOU</div>
+          <div class="player-score" id="player-score">0</div>
+        </div>
+        
+        <div class="score-divider">
+          <div class="match-info" id="match-info">FIRST TO 11</div>
+          <div class="rally-counter" id="rally-counter">RALLY: 0</div>
+        </div>
+
+        <div class="score-card cpu-card" id="cpu-score-card">
+          <div class="server-indicator" id="cpu-serve-indicator">SERVE</div>
+          <div class="player-name" id="cpu-name">CPU (PRO)</div>
+          <div class="player-score" id="cpu-score">0</div>
+        </div>
+      </div>
+
+      <!-- Controls & Spin HUD Helper -->
+      <div id="controls-hint">
+        <div class="hint-item"><span class="key">Mouse Flick</span> or <span class="key">Space</span> Swing</div>
+        <div class="hint-item"><span class="key">↑ Flick</span> / <span class="key">J</span> Topspin</div>
+        <div class="hint-item"><span class="key">↓ Flick</span> / <span class="key">K</span> Slice</div>
+        <div class="hint-item"><span class="key">L</span> Smash</div>
+      </div>
+
+      <!-- Floating Shot Feedback ("PERFECT!", "SMASH!", "TOO EARLY") -->
+      <div id="feedback-banner" class="feedback-banner"></div>
+
+      <!-- Big Center Callout ("SERVE", "MATCH POINT", "DEUCE") -->
+      <div id="callout-banner" class="callout-banner"></div>
+
+      <!-- Serve Prompt Notification -->
+      <div id="serve-prompt" class="serve-prompt">
+        <div class="serve-icon">🏓</div>
+        <div class="serve-text">CLICK OR PRESS SPACE TO SERVE</div>
+        <div class="serve-subtext">Flick or swipe upward for topspin serve</div>
+      </div>
+    </div>
+
+    <!-- Main Menu Overlay -->
+    <div id="main-menu" class="overlay-screen active">
+      <div class="menu-card">
+        <div class="game-logo">
+          <span class="logo-wii">WII</span>
+          <span class="logo-title">TABLE TENNIS 3D</span>
+          <span class="logo-badge">ARCADE EDITION</span>
+        </div>
+        <p class="tagline">Timing • Spin • Precision • Dynamic Arcade Action</p>
+        
+        <div class="difficulty-picker">
+          <label>CHOOSE YOUR OPPONENT</label>
+          <div class="difficulty-buttons">
+            <button class="diff-btn" data-diff="novice">
+              <span class="diff-title">NOVICE</span>
+              <span class="diff-desc">Gentle rallies, forgiving pace</span>
+            </button>
+            <button class="diff-btn active" data-diff="pro">
+              <span class="diff-title">PRO</span>
+              <span class="diff-desc">Fast spins & sharp angles</span>
+            </button>
+            <button class="diff-btn" data-diff="master">
+              <span class="diff-title">CHAMPION</span>
+              <span class="diff-desc">Relentless smashes & Magnus curves</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-actions">
+          <button id="start-btn" class="primary-btn">PLAY MATCH</button>
+        </div>
+
+        <div class="control-guide">
+          <div class="guide-col">
+            <h4>🎯 Assisted Positioning</h4>
+            <p>Your paddle slides naturally into range along the baseline. You time the swing and shape the shot!</p>
+          </div>
+          <div class="guide-col">
+            <h4>⚡ Timing Determines Angle</h4>
+            <p>Hit early for cross-court angles, late for down-the-line shots, or center for deep baseline winners.</p>
+          </div>
+          <div class="guide-col">
+            <h4>🌀 Gesture Spin</h4>
+            <p>Flick mouse up for diving topspin, flick down for floating backspin slice.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Victory / Defeat Overlay -->
+    <div id="game-over-screen" class="overlay-screen">
+      <div class="game-over-card">
+        <div id="match-result-title" class="result-title">VICTORY!</div>
+        <div id="match-result-subtitle" class="result-subtitle">You won the championship!</div>
+
+        <div class="stats-grid">
+          <div class="stat-box">
+            <span class="stat-num" id="stat-final-score">11 - 8</span>
+            <span class="stat-lbl">Final Score</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-num" id="stat-longest-rally">14</span>
+            <span class="stat-lbl">Longest Rally</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-num" id="stat-smash-winners">3</span>
+            <span class="stat-lbl">Smash Winners</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-num" id="stat-perfect-timing">82%</span>
+            <span class="stat-lbl">Timing Accuracy</span>
+          </div>
+        </div>
+
+        <div class="game-over-actions">
+          <button id="rematch-btn" class="primary-btn">PLAY AGAIN</button>
+          <button id="menu-btn" class="secondary-btn">MAIN MENU</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
