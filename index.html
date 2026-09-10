@@ -22,13 +22,16 @@
       <div id="scoreboard">
         <div class="score-card player-card" id="player-score-card">
           <div class="server-indicator" id="player-serve-indicator">SERVE</div>
-          <div class="player-name">YOU</div>
+          <div class="player-name" id="player-hud-name">YOU</div>
           <div class="player-score" id="player-score">0</div>
         </div>
         
         <div class="score-divider">
           <div class="match-info" id="match-info">FIRST TO 11</div>
           <div class="rally-counter" id="rally-counter">RALLY: 0</div>
+          <div class="hud-ping-badge" id="hud-ping-badge" style="display: none;">
+            <span class="ping-icon">📶</span> <span id="hud-ping-val">--ms</span>
+          </div>
         </div>
 
         <div class="score-card cpu-card" id="cpu-score-card">
@@ -214,6 +217,21 @@
             </div>
           </div>
           <p class="tagline">Timing • Spin • Precision • Dynamic Arcade Action</p>
+
+          <!-- Live Edge Presence Counter -->
+          <div class="presence-bar" id="presence-bar">
+            <div class="presence-pill queue-pill" title="Players currently in matchmaking">
+              <span class="pulse-dot pulse-green"></span>
+              <span class="presence-count" id="queue-count">0</span>
+              <span class="presence-label">Looking for Match</span>
+            </div>
+            <div class="presence-divider">•</div>
+            <div class="presence-pill playing-pill" title="Players currently in a live match">
+              <span class="pulse-dot pulse-blue"></span>
+              <span class="presence-count" id="playing-count">0</span>
+              <span class="presence-label">In Match</span>
+            </div>
+          </div>
           
           <div class="difficulty-picker">
             <label>CHOOSE YOUR OPPONENT</label>
@@ -245,8 +263,86 @@
           </div>
 
           <div class="menu-actions">
-            <button id="start-btn" class="primary-btn">PLAY MATCH</button>
+            <button id="start-btn" class="secondary-btn bot-match-btn">
+              <span class="btn-icon">🤖</span> PLAY VS BOT
+            </button>
+            <button id="find-match-btn" class="primary-btn multiplayer-glow-btn">
+              <span class="btn-icon">⚡</span> QUICK MATCH (P2P)
+            </button>
+            <button id="play-friend-btn" class="secondary-btn">
+              <span class="btn-icon">👥</span> PLAY A FRIEND
+            </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matchmaking & Peer-to-Peer Modal -->
+    <div id="matchmaking-modal" class="overlay-screen">
+      <div class="modal-card matchmaking-card">
+        <button id="close-mm-btn" class="modal-close-btn" title="Cancel">✕</button>
+
+        <div class="mm-header">
+          <div class="modal-title" id="mm-title">MULTIPLAYER MATCHMAKING</div>
+          <p class="modal-subtitle">Direct WebRTC connection • Zero lag arbitration</p>
+        </div>
+
+        <!-- Arcade Nickname Row -->
+        <div class="nickname-section">
+          <label for="player-nickname">YOUR ARCADE NICKNAME</label>
+          <div class="nickname-input-wrap">
+            <span class="input-icon">👤</span>
+            <input type="text" id="player-nickname" maxlength="14" placeholder="Enter nickname..." />
+            <button id="random-name-btn" class="dice-btn" title="Generate random name">🎲</button>
+          </div>
+        </div>
+
+        <!-- Quick Match Radar View -->
+        <div id="mm-quick-view" class="mm-view-tab">
+          <div class="radar-container">
+            <div class="radar-circle circle-1"></div>
+            <div class="radar-circle circle-2"></div>
+            <div class="radar-circle circle-3"></div>
+            <div class="radar-sweep"></div>
+            <div class="radar-center-blip">🏓</div>
+          </div>
+
+          <div class="mm-status-box">
+            <div class="mm-status-title" id="mm-status-title">Scanning for opponents...</div>
+            <div class="mm-status-sub" id="mm-status-sub">Probing low-latency peers first</div>
+            <div class="match-ping-indicator" id="mm-ping-box">
+              <span class="ping-icon">📶</span>
+              <span class="ping-text">Estimated Latency:</span>
+              <strong id="mm-ping-val">-- ms</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Play Friend View (Room Code / Direct Link) -->
+        <div id="mm-friend-view" class="mm-view-tab" style="display: none;">
+          <div class="friend-boxes">
+            <div class="friend-box">
+              <h4>HOST A ROOM</h4>
+              <p>Share this 5-letter code or invite link:</p>
+              <div class="room-code-display" id="display-room-code">------</div>
+              <button id="copy-link-btn" class="secondary-btn copy-btn">
+                <span>📋 Copy Invite Link</span>
+              </button>
+            </div>
+            <div class="friend-divider"><span>OR</span></div>
+            <div class="friend-box">
+              <h4>JOIN A FRIEND</h4>
+              <p>Enter friend's room code to connect:</p>
+              <div class="join-input-group">
+                <input type="text" id="join-room-code-input" maxlength="6" placeholder="CODE" />
+                <button id="join-room-btn" class="primary-btn">JOIN</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="cancel-mm-btn" class="secondary-btn">CANCEL</button>
         </div>
       </div>
     </div>
@@ -289,9 +385,26 @@
           </div>
         </div>
 
-        <div class="game-over-actions">
+        <!-- Single Player Mode Actions -->
+        <div id="singleplayer-actions" class="game-over-actions">
           <button id="rematch-btn" class="primary-btn">PLAY AGAIN</button>
           <button id="menu-btn" class="secondary-btn">MAIN MENU</button>
+        </div>
+
+        <!-- Multiplayer Rematch Box -->
+        <div id="multiplayer-rematch-box" class="multiplayer-rematch-box" style="display: none;">
+          <div class="rematch-status" id="rematch-status-text">Challenge opponent to a rematch?</div>
+          <div class="game-over-actions">
+            <button id="multi-rematch-btn" class="primary-btn rematch-pulse">
+              <span>🔄 REMATCH</span>
+            </button>
+            <button id="multi-new-match-btn" class="secondary-btn">
+              <span>⚡ NEW MATCH</span>
+            </button>
+            <button id="multi-exit-btn" class="secondary-btn">
+              <span>🏠 MAIN MENU</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

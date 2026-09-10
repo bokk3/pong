@@ -15,7 +15,7 @@ export class Paddle {
   private handMesh!: THREE.Mesh;
 
   // Swing animation state
-  private isSwinging: boolean = false;
+  public isSwinging: boolean = false;
   private swingProgress: number = 0;
   private swingDuration: number = 0.22;
   private isForehand: boolean = true;

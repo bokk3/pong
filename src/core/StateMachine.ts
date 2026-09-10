@@ -39,6 +39,19 @@ export class StateMachine {
     this.setState('SERVE_WAIT');
   }
 
+  public syncScore(score: MatchScore): void {
+    this.score = { ...score };
+    this.eventBus.emit('score:updated', { ...this.score });
+  }
+
+  public applyRemotePoint(winner: PlayerId, reason: string, score: MatchScore): void {
+    this.score = { ...score };
+    this.pointResolved = true;
+    this.setState('POINT_SCORED');
+    this.eventBus.emit('point:scored', { winner, reason });
+    this.eventBus.emit('score:updated', { ...this.score });
+  }
+
   public setState(newState: GameState): void {
     const oldState = this.state;
     this.state = newState;

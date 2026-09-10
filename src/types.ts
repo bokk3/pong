@@ -12,6 +12,22 @@ export type GameState =
 
 export type PlayerId = 'PLAYER' | 'CPU';
 
+export type GameMode = 'BOT' | 'MULTIPLAYER';
+
+export type MultiplayerRole = 'HOST' | 'CLIENT';
+
+export interface NetworkStats {
+  pingMs: number;
+  connectionState: 'disconnected' | 'connecting' | 'connected';
+  remoteUsername?: string;
+  role?: MultiplayerRole;
+}
+
+export interface PresenceStats {
+  lookingCount: number;
+  playingCount: number;
+}
+
 export type ShotRating = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'SMASH' | 'MISS' | 'ACE';
 
 export type SpinType = 'NONE' | 'TOPSPIN' | 'BACKSPIN' | 'SIDESPIN_LEFT' | 'SIDESPIN_RIGHT';
@@ -59,4 +75,8 @@ export type GameEvents = {
   'point:scored': { winner: PlayerId; reason: string };
   'match:over': { winner: PlayerId; score: MatchScore };
   'camera:shake': { intensity: number; duration: number };
+  'network:ping': { pingMs: number };
+  'network:status': { status: 'disconnected' | 'connecting' | 'connected'; message?: string; role?: MultiplayerRole; remoteUsername?: string };
+  'presence:updated': PresenceStats;
+  'multiplayer:rematch': { from: 'local' | 'remote'; status: 'requested' | 'accepted' | 'declined' };
 };

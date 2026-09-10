@@ -12,7 +12,10 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { HUD } from '../ui/HUD';
 import { StateMachine } from './StateMachine';
 import { EventBus } from './EventBus';
-import { Difficulty } from '../types';
+import { Difficulty, GameMode, MultiplayerRole, PlayerId } from '../types';
+import { NetworkManager } from '../network/NetworkManager';
+import { RemotePlayerController } from '../controllers/RemotePlayerController';
+import { NetworkMessage } from '../network/NetworkProtocol';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -30,7 +33,10 @@ export class Game {
   // Controllers & Systems
   private playerCtrl: PlayerController;
   private aiCtrl: AIController;
+  private remotePlayerCtrl: RemotePlayerController;
   private webcamCtrl: WebcamController;
+  private network: NetworkManager;
+  private mode: GameMode = 'BOT';
   private vfx: VFXManager;
   private sound: SoundEngine;
   private hud: HUD;
@@ -87,8 +93,23 @@ export class Game {
     // 4. Controllers & Logic
     this.playerCtrl = new PlayerController(this.playerPaddle, this.ball);
     this.aiCtrl = new AIController(this.cpuPaddle, this.ball, 'pro');
+    this.remotePlayerCtrl = new RemotePlayerController(this.cpuPaddle);
     this.stateMachine = new StateMachine();
     this.hud = new HUD();
+    this.network = NetworkManager.get();
+
+    // Broadcast local paddle position at 60Hz over WebRTC DataChannel
+    this.playerCtrl.onPaddlePositionUpdate = (x, y, z, isForehand, isSwinging) => {
+      if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
+        this.network.send({
+          type: 'PADDLE_MOVE',
+          x, y, z, isForehand, isSwinging
+        });
+      }
+    };
+
+    // Handle incoming WebRTC messages
+    this.network.onMessageReceived = (msg) => this.handleNetworkMessage(msg);
 
     // 5. Webcam Controller
     this.webcamCtrl = new WebcamController({
@@ -96,7 +117,7 @@ export class Game {
         this.playerCtrl.setExternalMotion(normX);
       },
       onSwipeStrike: (spin, power, isSmash, angleBias) => {
-        if (this.stateMachine.state === 'SERVE_WAIT' && this.stateMachine.score.server === 'PLAYER') {
+        if (this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
           this.playerCtrl.executeServe();
         } else if (this.stateMachine.state === 'RALLY') {
           this.playerCtrl.triggerExternalStrike(spin, power, isSmash, angleBias);
@@ -165,7 +186,18 @@ export class Game {
     // HUD Menu Actions
     this.hud.onStartMatch = (diff: Difficulty) => {
       this.sound.init();
+      this.mode = 'BOT';
+      this.hud.setOpponentName(`CPU (${diff.toUpperCase()})`);
       this.aiCtrl.setDifficulty(diff);
+      this.stateMachine.resetMatch();
+      this.startMatchSequence();
+    };
+
+    this.hud.onStartMultiplayerMatch = (_role: MultiplayerRole, remoteUsername: string) => {
+      this.sound.init();
+      this.mode = 'MULTIPLAYER';
+      this.hud.setOpponentName(remoteUsername);
+      this.remotePlayerCtrl.resetPosition();
       this.stateMachine.resetMatch();
       this.startMatchSequence();
     };
@@ -173,23 +205,32 @@ export class Game {
     this.hud.onRematch = () => {
       this.isPaused = false;
       this.hud.showPauseMenu(false);
-      this.stateMachine.resetMatch();
-      this.startMatchSequence();
+      if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
+        this.network.send({ type: 'REMATCH_REQUEST', status: 'requested' });
+        this.eventBus.emit('multiplayer:rematch', { from: 'local', status: 'requested' });
+      } else {
+        this.stateMachine.resetMatch();
+        this.startMatchSequence();
+      }
     };
 
     this.hud.onReturnToMenu = () => {
       this.isPaused = false;
       this.hud.showPauseMenu(false);
       this.ball.physics.stop();
+      if (this.mode === 'MULTIPLAYER') {
+        this.network.disconnect();
+      }
+      this.mode = 'BOT';
       this.stateMachine.setState('MENU');
     };
 
     // State Changes
     this.eventBus.on('state:changed', ({ to }) => {
       if (to === 'SERVE_WAIT') {
-        const isPlayerServe = this.stateMachine.score.server === 'PLAYER';
-        this.hud.showServePrompt(isPlayerServe);
-        if (!isPlayerServe) {
+        const canServe = this.isLocalPlayerTurnToServe();
+        this.hud.showServePrompt(canServe);
+        if (!canServe && this.mode === 'BOT') {
           setTimeout(() => {
             if (this.stateMachine.state === 'SERVE_WAIT') {
               this.aiCtrl.executeServe();
@@ -203,7 +244,7 @@ export class Game {
 
     // Space / Click for player serve
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.stateMachine.score.server === 'PLAYER') {
+      if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
       if (e.code === 'Escape') {
@@ -218,7 +259,7 @@ export class Game {
     });
 
     this.canvas.addEventListener('pointerdown', () => {
-      if (this.stateMachine.state === 'SERVE_WAIT' && this.stateMachine.score.server === 'PLAYER') {
+      if (this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
     });
@@ -233,6 +274,21 @@ export class Game {
         this.freezeFrames = 2; // 30ms impact micro-pause
         this.cameraCtrl.triggerFovPunch(48);
         this.cameraCtrl.triggerShake(0.09, 0.35);
+      }
+
+      // Broadcast shot to remote player over WebRTC
+      if (this.mode === 'MULTIPLAYER' && shot.hitter === 'PLAYER' && this.network.isConnected) {
+        this.network.send({
+          type: 'BALL_HIT',
+          hitter: 'PLAYER',
+          contactPoint: [shot.contactPoint.x, shot.contactPoint.y, shot.contactPoint.z],
+          velocity: [this.ball.physics.velocity.x, this.ball.physics.velocity.y, this.ball.physics.velocity.z],
+          spin: [this.ball.physics.spin.x, this.ball.physics.spin.y, this.ball.physics.spin.z],
+          rating: shot.rating,
+          speed: shot.speed,
+          isSmash: shot.isSmash,
+          spinType: shot.spin
+        });
       }
     });
 
@@ -257,6 +313,19 @@ export class Game {
       this.stadium.celebrate();
       this.sound.playCheer();
 
+      // Host broadcasts the point and score to client
+      if (this.mode === 'MULTIPLAYER' && this.network.role === 'HOST' && this.network.isConnected) {
+        this.network.send({
+          type: 'POINT_SCORED',
+          winner,
+          reason
+        });
+        this.network.send({
+          type: 'SCORE_SYNC',
+          score: this.stateMachine.score
+        });
+      }
+
       if (winner === 'PLAYER') {
         if (reason === 'ACE!') {
           this.hud.showShotFeedback({
@@ -272,7 +341,8 @@ export class Game {
           this.hud.showCallout(`POINT TO YOU! (${reason})`, 1000);
         }
       } else {
-        this.hud.showCallout(`CPU SCORED (${reason})`, 1000);
+        const oppName = this.mode === 'MULTIPLAYER' ? this.network.remoteUsername.toUpperCase() : 'CPU';
+        this.hud.showCallout(`${oppName} SCORED (${reason})`, 1000);
       }
     });
 
@@ -284,6 +354,80 @@ export class Game {
       }
       this.stadium.celebrate();
     });
+  }
+
+  private isLocalPlayerTurnToServe(): boolean {
+    if (this.mode === 'BOT') {
+      return this.stateMachine.score.server === 'PLAYER';
+    }
+    // In Multiplayer: Host is PLAYER, Client is CPU from local perspective
+    if (this.network.role === 'HOST') {
+      return this.stateMachine.score.server === 'PLAYER';
+    } else {
+      return this.stateMachine.score.server === 'CPU';
+    }
+  }
+
+  private handleNetworkMessage(msg: NetworkMessage): void {
+    if (msg.type === 'PADDLE_MOVE') {
+      this.remotePlayerCtrl.onRemotePaddleMove(msg);
+      return;
+    }
+
+    if (msg.type === 'BALL_HIT') {
+      // Invert coordinates for ball struck from opposite side of court
+      const invX = -msg.contactPoint[0];
+      const invY = msg.contactPoint[1];
+      const invZ = -msg.contactPoint[2];
+
+      const invVx = -msg.velocity[0];
+      const invVy = msg.velocity[1];
+      const invVz = -msg.velocity[2];
+
+      const invSx = -msg.spin[0];
+      const invSy = -msg.spin[1];
+      const invSz = -msg.spin[2];
+
+      this.ball.physics.position.set(invX, invY, invZ);
+      this.ball.physics.velocity.set(invVx, invVy, invVz);
+      this.ball.physics.spin.set(invSx, invSy, invSz);
+      this.ball.physics.isActive = true;
+
+      this.sound.playPaddleHit(msg.speed / 12, msg.isSmash);
+      this.sound.playSwoosh(msg.speed / 14);
+      this.vfx.createHitSparks(this.ball.physics.position, msg.isSmash);
+
+      this.eventBus.emit('ball:hit', {
+        hitter: 'CPU',
+        rating: msg.rating,
+        speed: msg.speed,
+        spin: msg.spinType,
+        isSmash: msg.isSmash,
+        contactPoint: this.ball.physics.position.clone()
+      });
+      return;
+    }
+
+    if (msg.type === 'POINT_SCORED') {
+      if (this.network.role === 'CLIENT') {
+        const localWinner: PlayerId = msg.winner === 'PLAYER' ? 'CPU' : 'PLAYER';
+        this.stateMachine.applyRemotePoint(localWinner, msg.reason, this.stateMachine.score);
+      }
+      return;
+    }
+
+    if (msg.type === 'SCORE_SYNC') {
+      if (this.network.role === 'CLIENT') {
+        const invertedScore = {
+          ...msg.score,
+          player: msg.score.cpu,
+          cpu: msg.score.player,
+          server: (msg.score.server === 'PLAYER' ? 'CPU' : 'PLAYER') as PlayerId
+        };
+        this.stateMachine.syncScore(invertedScore);
+      }
+      return;
+    }
   }
 
   private setupWindowEvents(): void {
@@ -335,7 +479,11 @@ export class Game {
     // Update Game Elements
     if (this.stateMachine.state !== 'MENU') {
       this.playerCtrl.update(dt);
-      this.aiCtrl.update(dt);
+      if (this.mode === 'BOT') {
+        this.aiCtrl.update(dt);
+      } else {
+        this.remotePlayerCtrl.update(dt);
+      }
       this.ball.update(dt);
       this.stadium.update(dt);
       this.vfx.update(dt);

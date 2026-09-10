@@ -22,6 +22,7 @@ export class PlayerController {
   // Settings & Sensitivity
   public sensitivity: number = 1.2; // Default 1.2x (range 0.5x to 2.5x)
   public isWebcamMode: boolean = false;
+  public onPaddlePositionUpdate: ((x: number, y: number, z: number, isForehand: boolean, isSwinging: boolean) => void) | null = null;
 
   // Input tracking
   private mousePrevPos = { x: 0, y: 0 };
@@ -236,6 +237,16 @@ export class PlayerController {
     // Smoothly update paddle target
     this.paddle.targetPosition.set(targetX, targetY, targetZ);
     this.paddle.update(dt);
+
+    if (this.onPaddlePositionUpdate) {
+      this.onPaddlePositionUpdate(
+        this.paddle.position.x,
+        this.paddle.position.y,
+        this.paddle.position.z,
+        this.ball.physics.position.x >= this.paddle.position.x - 0.05,
+        this.paddle.isSwinging
+      );
+    }
   }
 
   /**

@@ -1,20 +1,29 @@
-import { Difficulty, MatchScore, PlayerId, ShotInfo } from '../types';
+import { Difficulty, MatchScore, PlayerId, ShotInfo, MultiplayerRole } from '../types';
 import { EventBus } from '../core/EventBus';
+import { NetworkManager } from '../network/NetworkManager';
 
 export class HUD {
   private eventBus: EventBus;
+  private network: NetworkManager;
 
   // DOM Elements - Scoreboard
   private playerScoreEl: HTMLElement;
   private cpuScoreEl: HTMLElement;
   private playerCardEl: HTMLElement;
   private cpuCardEl: HTMLElement;
+  private playerHudNameEl: HTMLElement;
   private cpuNameEl: HTMLElement;
   private rallyCounterEl: HTMLElement;
   private matchInfoEl: HTMLElement;
   private feedbackBannerEl: HTMLElement;
   private calloutBannerEl: HTMLElement;
   private servePromptEl: HTMLElement;
+  private hudPingBadgeEl: HTMLElement;
+  private hudPingValEl: HTMLElement;
+
+  // Presence Counter Elements
+  private queueCountEl: HTMLElement;
+  private playingCountEl: HTMLElement;
 
   // Settings & Webcam DOM Elements
   private sensitivitySliderEl: HTMLInputElement;
@@ -29,16 +38,42 @@ export class HUD {
   private webcamVideoEl: HTMLVideoElement;
   private webcamOverlayCanvas: HTMLCanvasElement;
 
-  // Menu Overlays
+  // Menu Overlays & Buttons
   private mainMenuEl: HTMLElement;
   private pauseMenuEl: HTMLElement;
   private gameOverEl: HTMLElement;
   private startBtn: HTMLElement;
+  private findMatchBtn: HTMLElement;
+  private playFriendBtn: HTMLElement;
   private resumeBtn: HTMLElement;
   private pauseRestartBtn: HTMLElement;
   private pauseMenuBtn: HTMLElement;
   private rematchBtn: HTMLElement;
   private menuBtn: HTMLElement;
+
+  // Matchmaking Modal Elements
+  private mmModalEl: HTMLElement;
+  private closeMmBtn: HTMLElement;
+  private cancelMmBtn: HTMLElement;
+  private nicknameInput: HTMLInputElement;
+  private randomNameBtn: HTMLElement;
+  private mmQuickViewEl: HTMLElement;
+  private mmFriendViewEl: HTMLElement;
+  private mmStatusTitleEl: HTMLElement;
+  private mmStatusSubEl: HTMLElement;
+  private mmPingValEl: HTMLElement;
+  private displayRoomCodeEl: HTMLElement;
+  private copyLinkBtn: HTMLElement;
+  private joinRoomInput: HTMLInputElement;
+  private joinRoomBtn: HTMLElement;
+
+  // Game Over Actions (Singleplayer vs Multiplayer)
+  private singleplayerActionsEl: HTMLElement;
+  private multiplayerRematchBoxEl: HTMLElement;
+  private multiRematchBtn: HTMLElement;
+  private multiNewMatchBtn: HTMLElement;
+  private multiExitBtn: HTMLElement;
+  private rematchStatusTextEl: HTMLElement;
 
   // Stats DOM
   private statFinalScoreEl: HTMLElement;
@@ -51,9 +86,13 @@ export class HUD {
   private selectedDifficulty: Difficulty = 'pro';
   private feedbackTimeout: number | null = null;
   private calloutTimeout: number | null = null;
+  private currentMode: 'BOT' | 'MULTIPLAYER' = 'BOT';
+  private localRematchRequested: boolean = false;
+  private remoteRematchRequested: boolean = false;
 
   // Callbacks
   public onStartMatch: ((diff: Difficulty) => void) | null = null;
+  public onStartMultiplayerMatch: ((role: MultiplayerRole, remoteUsername: string) => void) | null = null;
   public onResume: (() => void) | null = null;
   public onRematch: (() => void) | null = null;
   public onReturnToMenu: (() => void) | null = null;
@@ -62,17 +101,26 @@ export class HUD {
 
   constructor() {
     this.eventBus = EventBus.get();
+    this.network = NetworkManager.get();
 
+    // Scoreboard
     this.playerScoreEl = document.getElementById('player-score')!;
     this.cpuScoreEl = document.getElementById('cpu-score')!;
     this.playerCardEl = document.getElementById('player-score-card')!;
     this.cpuCardEl = document.getElementById('cpu-score-card')!;
+    this.playerHudNameEl = document.getElementById('player-hud-name')!;
     this.cpuNameEl = document.getElementById('cpu-name')!;
     this.rallyCounterEl = document.getElementById('rally-counter')!;
     this.matchInfoEl = document.getElementById('match-info')!;
     this.feedbackBannerEl = document.getElementById('feedback-banner')!;
     this.calloutBannerEl = document.getElementById('callout-banner')!;
     this.servePromptEl = document.getElementById('serve-prompt')!;
+    this.hudPingBadgeEl = document.getElementById('hud-ping-badge')!;
+    this.hudPingValEl = document.getElementById('hud-ping-val')!;
+
+    // Presence
+    this.queueCountEl = document.getElementById('queue-count')!;
+    this.playingCountEl = document.getElementById('playing-count')!;
 
     // Settings & Webcam
     this.sensitivitySliderEl = document.getElementById('sensitivity-slider') as HTMLInputElement;
@@ -87,16 +135,44 @@ export class HUD {
     this.webcamVideoEl = document.getElementById('webcam-video') as HTMLVideoElement;
     this.webcamOverlayCanvas = document.getElementById('webcam-overlay') as HTMLCanvasElement;
 
+    // Menus
     this.mainMenuEl = document.getElementById('main-menu')!;
     this.pauseMenuEl = document.getElementById('pause-menu')!;
     this.gameOverEl = document.getElementById('game-over-screen')!;
     this.startBtn = document.getElementById('start-btn')!;
+    this.findMatchBtn = document.getElementById('find-match-btn')!;
+    this.playFriendBtn = document.getElementById('play-friend-btn')!;
     this.resumeBtn = document.getElementById('resume-btn')!;
     this.pauseRestartBtn = document.getElementById('pause-restart-btn')!;
     this.pauseMenuBtn = document.getElementById('pause-menu-btn')!;
     this.rematchBtn = document.getElementById('rematch-btn')!;
     this.menuBtn = document.getElementById('menu-btn')!;
 
+    // Matchmaking Modal
+    this.mmModalEl = document.getElementById('matchmaking-modal')!;
+    this.closeMmBtn = document.getElementById('close-mm-btn')!;
+    this.cancelMmBtn = document.getElementById('cancel-mm-btn')!;
+    this.nicknameInput = document.getElementById('player-nickname') as HTMLInputElement;
+    this.randomNameBtn = document.getElementById('random-name-btn')!;
+    this.mmQuickViewEl = document.getElementById('mm-quick-view')!;
+    this.mmFriendViewEl = document.getElementById('mm-friend-view')!;
+    this.mmStatusTitleEl = document.getElementById('mm-status-title')!;
+    this.mmStatusSubEl = document.getElementById('mm-status-sub')!;
+    this.mmPingValEl = document.getElementById('mm-ping-val')!;
+    this.displayRoomCodeEl = document.getElementById('display-room-code')!;
+    this.copyLinkBtn = document.getElementById('copy-link-btn')!;
+    this.joinRoomInput = document.getElementById('join-room-code-input') as HTMLInputElement;
+    this.joinRoomBtn = document.getElementById('join-room-btn')!;
+
+    // Rematch Elements
+    this.singleplayerActionsEl = document.getElementById('singleplayer-actions')!;
+    this.multiplayerRematchBoxEl = document.getElementById('multiplayer-rematch-box')!;
+    this.multiRematchBtn = document.getElementById('multi-rematch-btn')!;
+    this.multiNewMatchBtn = document.getElementById('multi-new-match-btn')!;
+    this.multiExitBtn = document.getElementById('multi-exit-btn')!;
+    this.rematchStatusTextEl = document.getElementById('rematch-status-text')!;
+
+    // Stats
     this.statFinalScoreEl = document.getElementById('stat-final-score')!;
     this.statLongestRallyEl = document.getElementById('stat-longest-rally')!;
     this.statSmashWinnersEl = document.getElementById('stat-smash-winners')!;
@@ -104,8 +180,14 @@ export class HUD {
     this.resultTitleEl = document.getElementById('match-result-title')!;
     this.resultSubtitleEl = document.getElementById('match-result-subtitle')!;
 
+    // Init username
+    this.nicknameInput.value = this.network.localUsername;
+    this.setPlayerName(this.network.localUsername.toUpperCase());
+
     this.setupUIEvents();
     this.setupGameListeners();
+    this.setupNetworkListeners();
+    this.checkUrlRoomParameter();
   }
 
   private setupUIEvents(): void {
@@ -116,7 +198,9 @@ export class HUD {
         diffButtons.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.selectedDifficulty = btn.dataset.diff as Difficulty;
-        this.cpuNameEl.textContent = `CPU (${this.selectedDifficulty.toUpperCase()})`;
+        if (this.currentMode === 'BOT') {
+          this.cpuNameEl.textContent = `CPU (${this.selectedDifficulty.toUpperCase()})`;
+        }
       });
     });
 
@@ -151,11 +235,80 @@ export class HUD {
     this.menuWebcamToggleBtn.addEventListener('click', triggerWebcam);
     this.webcamCloseBtn.addEventListener('click', triggerWebcam);
 
+    // Bot Match Button
     this.startBtn.addEventListener('click', () => {
+      this.currentMode = 'BOT';
+      this.hudPingBadgeEl.style.display = 'none';
       this.hideMainMenu();
       if (this.onStartMatch) this.onStartMatch(this.selectedDifficulty);
     });
 
+    // Multiplayer Buttons
+    this.findMatchBtn.addEventListener('click', () => {
+      this.openMatchmaking('quick');
+    });
+
+    this.playFriendBtn.addEventListener('click', () => {
+      this.openMatchmaking('friend');
+    });
+
+    // Matchmaking Modal Controls
+    this.closeMmBtn.addEventListener('click', () => this.closeMatchmaking());
+    this.cancelMmBtn.addEventListener('click', () => this.closeMatchmaking());
+
+    // Nickname Editing
+    this.nicknameInput.addEventListener('input', () => {
+      const val = this.nicknameInput.value.trim();
+      if (val.length > 0) {
+        this.network.setUsername(val);
+        this.setPlayerName(val.toUpperCase());
+      }
+    });
+
+    this.randomNameBtn.addEventListener('click', () => {
+      const randomName = this.generateRandomNickname();
+      this.nicknameInput.value = randomName;
+      this.network.setUsername(randomName);
+      this.setPlayerName(randomName.toUpperCase());
+    });
+
+    // Copy Invite Link Button
+    this.copyLinkBtn.addEventListener('click', async () => {
+      const code = this.displayRoomCodeEl.textContent?.trim();
+      if (!code || code === '------') return;
+      const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        this.copyLinkBtn.innerHTML = '<span>✅ Copied Invite Link!</span>';
+        setTimeout(() => {
+          this.copyLinkBtn.innerHTML = '<span>📋 Copy Invite Link</span>';
+        }, 2200);
+      } catch {
+        prompt('Copy room link:', url);
+      }
+    });
+
+    // Join Room Button
+    this.joinRoomBtn.addEventListener('click', async () => {
+      const code = this.joinRoomInput.value.trim().toUpperCase();
+      if (!code || code.length < 3) return;
+      this.joinRoomBtn.textContent = 'Connecting...';
+      this.joinRoomBtn.setAttribute('disabled', 'true');
+      const connected = await this.network.connectToPeer(code);
+      if (!connected) {
+        this.joinRoomBtn.textContent = 'JOIN';
+        this.joinRoomBtn.removeAttribute('disabled');
+        this.showCallout('COULD NOT CONNECT TO ROOM', 2000);
+      }
+    });
+
+    this.joinRoomInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        this.joinRoomBtn.click();
+      }
+    });
+
+    // Pause Menu Handlers
     this.resumeBtn.addEventListener('click', () => {
       this.showPauseMenu(false);
       if (this.onResume) this.onResume();
@@ -172,6 +325,7 @@ export class HUD {
       if (this.onReturnToMenu) this.onReturnToMenu();
     });
 
+    // Single Player Game Over Handlers
     this.rematchBtn.addEventListener('click', () => {
       this.hideGameOver();
       if (this.onRematch) this.onRematch();
@@ -179,6 +333,39 @@ export class HUD {
 
     this.menuBtn.addEventListener('click', () => {
       this.hideGameOver();
+      this.showMainMenu();
+      if (this.onReturnToMenu) this.onReturnToMenu();
+    });
+
+    // Multiplayer Rematch Handlers
+    this.multiRematchBtn.addEventListener('click', () => {
+      this.localRematchRequested = true;
+      this.multiRematchBtn.setAttribute('disabled', 'true');
+      this.multiRematchBtn.classList.remove('rematch-pulse');
+      this.rematchStatusTextEl.textContent = 'Waiting for opponent response...';
+
+      if (this.remoteRematchRequested) {
+        // Both agreed!
+        this.rematchStatusTextEl.textContent = 'Rematch accepted! Starting...';
+        this.network.send({ type: 'REMATCH_REQUEST', status: 'accepted' });
+        setTimeout(() => {
+          this.hideGameOver();
+          if (this.onRematch) this.onRematch();
+        }, 500);
+      } else {
+        this.network.send({ type: 'REMATCH_REQUEST', status: 'requested' });
+      }
+    });
+
+    this.multiNewMatchBtn.addEventListener('click', () => {
+      this.hideGameOver();
+      this.network.disconnect();
+      this.openMatchmaking('quick');
+    });
+
+    this.multiExitBtn.addEventListener('click', () => {
+      this.hideGameOver();
+      this.network.disconnect();
       this.showMainMenu();
       if (this.onReturnToMenu) this.onReturnToMenu();
     });
@@ -223,6 +410,180 @@ export class HUD {
     });
   }
 
+  private setupNetworkListeners(): void {
+    // Ping listener
+    this.eventBus.on('network:ping', ({ pingMs }) => {
+      this.updatePing(pingMs);
+    });
+
+    // Presence update listener
+    this.eventBus.on('presence:updated', ({ lookingCount, playingCount }) => {
+      this.queueCountEl.textContent = String(lookingCount);
+      this.playingCountEl.textContent = String(playingCount);
+    });
+
+    // Network connection status
+    this.eventBus.on('network:status', ({ status, role, remoteUsername, message }) => {
+      if (status === 'connected') {
+        this.mmStatusTitleEl.textContent = 'Opponent Connected!';
+        this.mmStatusSubEl.textContent = `Matched with ${remoteUsername} (Direct P2P)`;
+        this.hudPingBadgeEl.style.display = 'flex';
+        this.currentMode = 'MULTIPLAYER';
+
+        this.setOpponentName(remoteUsername ? remoteUsername.toUpperCase() : 'OPPONENT');
+        this.setPlayerName(this.network.localUsername.toUpperCase());
+
+        setTimeout(() => {
+          this.closeMatchmaking();
+          this.hideMainMenu();
+          if (this.onStartMultiplayerMatch) {
+            this.onStartMultiplayerMatch(role || 'CLIENT', remoteUsername || 'Opponent');
+          }
+        }, 600);
+      } else if (status === 'disconnected') {
+        this.hudPingBadgeEl.style.display = 'none';
+        this.rematchStatusTextEl.textContent = 'Opponent disconnected.';
+        this.multiRematchBtn.setAttribute('disabled', 'true');
+        this.multiRematchBtn.classList.remove('rematch-pulse');
+        if (this.currentMode === 'MULTIPLAYER') {
+          this.showCallout(message || 'OPPONENT DISCONNECTED', 2000);
+        }
+      }
+    });
+
+    // Rematch coordination
+    this.eventBus.on('multiplayer:rematch', ({ from, status }) => {
+      if (from === 'remote') {
+        if (status === 'requested') {
+          this.remoteRematchRequested = true;
+          this.rematchStatusTextEl.textContent = 'Opponent requested a rematch! Click Rematch to accept.';
+          this.multiRematchBtn.removeAttribute('disabled');
+          this.multiRematchBtn.classList.add('rematch-pulse');
+          this.showCallout('OPPONENT WANTS REMATCH!', 1500);
+
+          if (this.localRematchRequested) {
+            // Both ready!
+            this.network.send({ type: 'REMATCH_REQUEST', status: 'accepted' });
+            this.rematchStatusTextEl.textContent = 'Rematch accepted! Starting...';
+            setTimeout(() => {
+              this.hideGameOver();
+              if (this.onRematch) this.onRematch();
+            }, 500);
+          }
+        } else if (status === 'accepted') {
+          this.rematchStatusTextEl.textContent = 'Rematch accepted! Starting...';
+          setTimeout(() => {
+            this.hideGameOver();
+            if (this.onRematch) this.onRematch();
+          }, 500);
+        }
+      }
+    });
+  }
+
+  private checkUrlRoomParameter(): void {
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get('room');
+    if (room && room.trim().length >= 3) {
+      this.openMatchmaking('friend');
+      this.joinRoomInput.value = room.trim().toUpperCase();
+      this.showCallout(`JOINING ROOM ${room.toUpperCase()}...`, 1500);
+      setTimeout(() => {
+        this.joinRoomBtn.click();
+      }, 300);
+    }
+  }
+
+  // --- Matchmaking Management ---
+  public async openMatchmaking(view: 'quick' | 'friend'): Promise<void> {
+    this.mmModalEl.classList.add('active');
+    this.nicknameInput.value = this.network.localUsername;
+
+    if (view === 'quick') {
+      this.mmQuickViewEl.style.display = 'block';
+      this.mmFriendViewEl.style.display = 'none';
+      await this.startQuickMatchmaking();
+    } else {
+      this.mmQuickViewEl.style.display = 'none';
+      this.mmFriendViewEl.style.display = 'block';
+      this.startFriendRoomHosting();
+    }
+  }
+
+  public closeMatchmaking(): void {
+    this.mmModalEl.classList.remove('active');
+    if (!this.network.isConnected) {
+      this.network.reportPresence('menu');
+    }
+  }
+
+  private async startQuickMatchmaking(): Promise<void> {
+    this.mmStatusTitleEl.textContent = 'Scanning for opponents...';
+    this.mmStatusSubEl.textContent = 'Querying lowest-latency players first';
+    this.mmPingValEl.textContent = '-- ms';
+
+    // 1. Report searching status to edge presence
+    const presenceData = await this.network.reportPresence('searching');
+    const candidates = presenceData?.candidates || [];
+
+    // 2. If candidate peers are waiting, probe for lowest latency
+    if (candidates.length > 0) {
+      this.mmStatusSubEl.textContent = `Testing ping for ${candidates.length} active challengers...`;
+      const bestRoomId = await this.network.findBestCandidateMatch(candidates);
+      if (bestRoomId) {
+        this.mmStatusTitleEl.textContent = 'Match Found!';
+        this.mmStatusSubEl.textContent = 'Connecting to best latency opponent...';
+        return;
+      }
+    }
+
+    // 3. Fallback: Host and wait for challenger
+    this.mmStatusTitleEl.textContent = 'Waiting for Challenger...';
+    const code = await this.network.initPeer();
+    this.mmStatusSubEl.textContent = `Hosting room [${code.toUpperCase()}]. Probing incoming connections...`;
+  }
+
+  private async startFriendRoomHosting(): Promise<void> {
+    this.displayRoomCodeEl.textContent = '...';
+    const code = await this.network.initPeer();
+    this.displayRoomCodeEl.textContent = code.toUpperCase();
+  }
+
+  private generateRandomNickname(): string {
+    const adjectives = ['Apex', 'Vortex', 'Spin', 'Cyber', 'Sonic', 'Flash', 'Hyper', 'Turbo', 'Neon'];
+    const nouns = ['Master', 'Ace', 'Paddle', 'Striker', 'Hero', 'Wizard', 'King', 'Legend', 'Champ'];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    return `${adj}${noun}`;
+  }
+
+  // --- Public Display Setters ---
+  public setPlayerName(name: string): void {
+    if (this.playerHudNameEl) {
+      this.playerHudNameEl.textContent = name;
+    }
+  }
+
+  public setOpponentName(name: string): void {
+    if (this.cpuNameEl) {
+      this.cpuNameEl.textContent = name;
+    }
+  }
+
+  public updatePing(ms: number): void {
+    const formatted = `${ms}ms`;
+    if (this.hudPingValEl) this.hudPingValEl.textContent = formatted;
+    if (this.mmPingValEl) this.mmPingValEl.textContent = `${ms} ms`;
+
+    const color = ms < 60 ? '#00ff88' : ms < 120 ? '#ffcc00' : '#ff3b30';
+    if (this.hudPingBadgeEl) {
+      this.hudPingBadgeEl.style.borderColor = color;
+    }
+    if (this.hudPingValEl) {
+      this.hudPingValEl.style.color = color;
+    }
+  }
+
   public setWebcamActive(active: boolean): void {
     if (active) {
       this.webcamPipEl.classList.add('active');
@@ -254,6 +615,7 @@ export class HUD {
   public showMainMenu(): void {
     this.mainMenuEl.classList.add('active');
     this.servePromptEl.classList.remove('active');
+    this.network.reportPresence('menu');
   }
 
   public hideMainMenu(): void {
@@ -382,6 +744,20 @@ export class HUD {
       ? Math.round((score.goodOrBetterShots / score.totalPlayerShots) * 100)
       : 0;
     this.statAccuracyEl.textContent = `${accuracy}%`;
+
+    // Toggle Singleplayer vs Multiplayer Action buttons
+    if (this.currentMode === 'MULTIPLAYER') {
+      this.singleplayerActionsEl.style.display = 'none';
+      this.multiplayerRematchBoxEl.style.display = 'flex';
+      this.localRematchRequested = false;
+      this.remoteRematchRequested = false;
+      this.multiRematchBtn.removeAttribute('disabled');
+      this.multiRematchBtn.classList.remove('rematch-pulse');
+      this.rematchStatusTextEl.textContent = 'Challenge opponent to a rematch?';
+    } else {
+      this.singleplayerActionsEl.style.display = 'flex';
+      this.multiplayerRematchBoxEl.style.display = 'none';
+    }
 
     this.gameOverEl.classList.add('active');
   }
