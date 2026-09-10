@@ -210,7 +210,7 @@ export class Game {
       this.sound.init();
       this.mode = 'BOT';
       if (this.gameModeType === 'CURVE') {
-        this.startCurveMatch(false);
+        this.startCurveMatch(false, diff);
       } else {
         this.hud.setOpponentName(`CPU (${diff.toUpperCase()})`);
         this.aiCtrl.setDifficulty(diff);
@@ -238,6 +238,7 @@ export class Game {
       if (this.gameModeType === 'CURVE') {
         this.startCurveMatch(this.mode === 'MULTIPLAYER');
       } else if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
+
         this.network.send({ type: 'REMATCH_REQUEST', status: 'requested' });
         this.eventBus.emit('multiplayer:rematch', { from: 'local', status: 'requested' });
       } else {
@@ -418,18 +419,19 @@ export class Game {
     this.stadium.group.visible = visible;
   }
 
-  private startCurveMatch(isMultiplayer: boolean): void {
+  private startCurveMatch(isMultiplayer: boolean, diff: Difficulty = 'pro'): void {
     this.gameModeType = 'CURVE';
     this.setEntitiesVisibility(false); // Hides ping pong table, net, stadium, paddles, and ball
     this.curveMode.group.visible = true; // Shows plain square 2D arena
     this.cameraCtrl.setMode('CURVE'); // True 2D top-down view
     this.stateMachine.setState('RALLY'); // Active playing state
 
-    const oppName = isMultiplayer ? this.network.remoteUsername : 'BOT (CURVE)';
+    const oppName = isMultiplayer ? this.network.remoteUsername : `BOT (${diff.toUpperCase()})`;
     this.hud.setOpponentName(oppName);
     this.sound.playWhistle();
-    this.curveMode.startMatch(isMultiplayer);
+    this.curveMode.startMatch(isMultiplayer, diff);
   }
+
 
 
   private handleNetworkMessage(msg: NetworkMessage): void {

@@ -33,8 +33,8 @@ function distToSegment(
   return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
 }
 
-// Plain Square 2D Arena size: 3.2 x 3.2 square
-export const CURVE_ARENA_SIZE = 3.2;
+// Larger Square 2D Arena size: 4.8 x 4.8 square for plenty of maneuvering room
+export const CURVE_ARENA_SIZE = 4.8;
 export const CURVE_ARENA_HALF = CURVE_ARENA_SIZE / 2;
 
 export class CurveController {
@@ -42,6 +42,7 @@ export class CurveController {
   public trail: CurveTrail;
   public isBot: boolean = false;
   public isAlive: boolean = true;
+  public difficulty: 'novice' | 'pro' | 'master' = 'novice';
 
   // Head state on arena plane (X, Z)
   public x: number = 0;
@@ -86,7 +87,7 @@ export class CurveController {
     this.headMesh.position.y = 0.012;
 
     // Outer square boundaries with small safety padding
-    const margin = 0.03;
+    const margin = 0.04;
     this.minX = -CURVE_ARENA_HALF + margin;
     this.maxX = CURVE_ARENA_HALF - margin;
     this.minZ = -CURVE_ARENA_HALF + margin;
@@ -94,6 +95,7 @@ export class CurveController {
 
     this.scheduleNextGap();
   }
+
 
 
   public reset(spawnX: number, spawnZ: number, spawnAngle: number): void {
@@ -221,25 +223,33 @@ export class CurveController {
   }
 
   /**
-   * Smart curve Bot AI: casts rays ahead to evaluate free travel distance
+   * Smart curve Bot AI:
+   * Casts fan of predictive rays ahead to evaluate free travel distance,
+   * detects dead ends, and adds gentle inward wall repulsion so bot doesn't slam into borders.
    */
   private computeBotSteering(opponentTrail?: CurveTrail): void {
-    const lookAheadDistance = 0.45; // lookahead distance in arena
-    const anglesToTest = [
-      { dir: 0 as (-1 | 0 | 1), offset: 0 },
-      { dir: -1 as (-1 | 0 | 1), offset: -0.45 },
-      { dir: 1 as (-1 | 0 | 1), offset: 0.45 },
-      { dir: -1 as (-1 | 0 | 1), offset: -0.9 },
-      { dir: 1 as (-1 | 0 | 1), offset: 0.9 }
+    // Lookahead distance scaled by difficulty
+    const lookAheadDistance = this.difficulty === 'novice' ? 0.75 : this.difficulty === 'pro' ? 0.95 : 1.25;
+
+    // Test a broader fan of prospective steering directions:
+    // Straight (0), gentle turns (±0.35 rad), sharp turns (±0.7 rad), hard evasions (±1.1 rad)
+    const anglesToTest: Array<{ dir: -1 | 0 | 1; offset: number; weight: number }> = [
+      { dir: 0, offset: 0, weight: 1.1 },
+      { dir: -1, offset: -0.35, weight: 1.0 },
+      { dir: 1, offset: 0.35, weight: 1.0 },
+      { dir: -1, offset: -0.7, weight: 0.95 },
+      { dir: 1, offset: 0.7, weight: 0.95 },
+      { dir: -1, offset: -1.15, weight: 0.85 },
+      { dir: 1, offset: 1.15, weight: 0.85 }
     ];
 
     let bestDir: -1 | 0 | 1 = 0;
-    let maxClearDistance = -1;
+    let maxScore = -999;
 
     for (const test of anglesToTest) {
       const testAngle = this.angle + test.offset;
       let clearDist = 0;
-      const steps = 7;
+      const steps = 10;
       let hit = false;
 
       for (let s = 1; s <= steps; s++) {
@@ -247,28 +257,30 @@ export class CurveController {
         const tx = this.x + Math.cos(testAngle) * d;
         const tz = this.z + Math.sin(testAngle) * d;
 
-        // Check square boundaries
-        if (tx <= this.minX || tx >= this.maxX || tz <= this.minZ || tz >= this.maxZ) {
+        // 1. Check square boundaries (leave generous safety buffer of 0.08)
+        if (tx <= this.minX + 0.08 || tx >= this.maxX - 0.08 || tz <= this.minZ + 0.08 || tz >= this.maxZ - 0.08) {
           hit = true;
           break;
         }
 
-        // Check own trail
+        // 2. Check own trail
         const p = { x: tx, y: tz };
-        for (const seg of this.trail.segments) {
-          if (this.totalElapsed - seg.time < 0.22) continue;
-          if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.4) {
+        const graceTime = 0.25;
+        for (let i = 0; i < this.trail.segments.length; i++) {
+          const seg = this.trail.segments[i];
+          if (this.totalElapsed - seg.time < graceTime) continue;
+          if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.8) {
             hit = true;
             break;
           }
         }
         if (hit) break;
 
-
-        // Check opponent trail
+        // 3. Check opponent trail
         if (opponentTrail) {
-          for (const seg of opponentTrail.segments) {
-            if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.4) {
+          for (let i = 0; i < opponentTrail.segments.length; i++) {
+            const seg = opponentTrail.segments[i];
+            if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.8) {
               hit = true;
               break;
             }
@@ -283,17 +295,23 @@ export class CurveController {
         clearDist = lookAheadDistance;
       }
 
-      // Add slight bias to continue straight if safe
-      const score = clearDist + (test.dir === 0 ? 0.05 : 0);
+      // Bonus score for staying away from borders (inward center bias)
+      const futureX = this.x + Math.cos(testAngle) * clearDist;
+      const futureZ = this.z + Math.sin(testAngle) * clearDist;
+      const distFromCenter = Math.hypot(futureX, futureZ);
+      const centerBonus = Math.max(0, 1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 0.15;
 
-      if (score > maxClearDistance) {
-        maxClearDistance = score;
+      const score = (clearDist * test.weight) + centerBonus;
+
+      if (score > maxScore) {
+        maxScore = score;
         bestDir = test.dir;
       }
     }
 
     this.steering = bestDir;
   }
+
 
   public dispose(): void {
     this.trail.dispose();

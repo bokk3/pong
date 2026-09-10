@@ -45,7 +45,7 @@ export class CurveGameMode {
   }
 
   private buildSquareArena(): void {
-    const size = 3.2;
+    const size = 4.8; // Expanded square canvas
     const half = size / 2;
 
     // 1. Dark, crisp matte arena floor (like classic Achtung die Kurve DOS canvas)
@@ -60,14 +60,14 @@ export class CurveGameMode {
     this.group.add(floor);
 
     // 2. Subtle grid lines on the square arena
-    const gridHelper = new THREE.GridHelper(size, 16, 0x1e293b, 0x0f172a);
+    const gridHelper = new THREE.GridHelper(size, 20, 0x1e293b, 0x0f172a);
     gridHelper.position.y = 0.001;
     this.group.add(gridHelper);
 
     // 3. Glowing outer boundary walls (classic Achtung border)
     const borderMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    const wallThick = 0.02;
-    const wallHeight = 0.04;
+    const wallThick = 0.025;
+    const wallHeight = 0.05;
 
     // Top wall (+Z)
     const wallTop = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
@@ -90,11 +90,12 @@ export class CurveGameMode {
     this.group.add(wallRight);
   }
 
-  public startMatch(isMultiplayer: boolean): void {
+  public startMatch(isMultiplayer: boolean, difficulty: 'novice' | 'pro' | 'master' = 'pro'): void {
     this.isMultiplayer = isMultiplayer;
     this.score = { player: 0, cpu: 0, targetScore: 5 };
     this.roundNumber = 1;
     this.p2.isBot = !isMultiplayer;
+    this.p2.difficulty = difficulty;
 
     this.eventBus.emit('curve:score', { ...this.score });
 
@@ -112,17 +113,18 @@ export class CurveGameMode {
     this.countdownTimer = 2.4;
 
     // Classic Achtung die Kurve spawn:
-    // Random positions comfortably inside the square (between -1.0 and 1.0), pointing in any random direction
-    const p1X = (Math.random() - 0.5) * 1.8;
-    const p1Z = (Math.random() - 0.5) * 1.8;
+    // Random positions comfortably inside the 4.8m square (between -1.6 and 1.6), pointing in random directions
+    const span = 3.0; // 3m span inside 4.8m square
+    const p1X = (Math.random() - 0.5) * span;
+    const p1Z = (Math.random() - 0.5) * span;
     const p1Angle = Math.random() * Math.PI * 2;
 
-    let p2X = (Math.random() - 0.5) * 1.8;
-    let p2Z = (Math.random() - 0.5) * 1.8;
+    let p2X = (Math.random() - 0.5) * span;
+    let p2Z = (Math.random() - 0.5) * span;
     // Ensure players don't spawn right on top of each other
-    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 0.8) {
-      p2X = (Math.random() - 0.5) * 1.8;
-      p2Z = (Math.random() - 0.5) * 1.8;
+    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 1.1) {
+      p2X = (Math.random() - 0.5) * span;
+      p2Z = (Math.random() - 0.5) * span;
     }
     const p2Angle = Math.random() * Math.PI * 2;
 
@@ -136,15 +138,16 @@ export class CurveGameMode {
     this.roundState = 'COUNTDOWN';
     this.countdownTimer = 2.4;
 
-    const p1X = (Math.random() - 0.5) * 1.8;
-    const p1Z = (Math.random() - 0.5) * 1.8;
+    const span = 3.0;
+    const p1X = (Math.random() - 0.5) * span;
+    const p1Z = (Math.random() - 0.5) * span;
     const p1Angle = Math.random() * Math.PI * 2;
 
-    let p2X = (Math.random() - 0.5) * 1.8;
-    let p2Z = (Math.random() - 0.5) * 1.8;
-    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 0.8) {
-      p2X = (Math.random() - 0.5) * 1.8;
-      p2Z = (Math.random() - 0.5) * 1.8;
+    let p2X = (Math.random() - 0.5) * span;
+    let p2Z = (Math.random() - 0.5) * span;
+    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 1.1) {
+      p2X = (Math.random() - 0.5) * span;
+      p2Z = (Math.random() - 0.5) * span;
     }
     const p2Angle = Math.random() * Math.PI * 2;
 
@@ -162,6 +165,7 @@ export class CurveGameMode {
 
     this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
   }
+
 
 
   public handleNetworkMessage(msg: NetworkMessage): void {

@@ -36,19 +36,20 @@ export class CameraController {
     this.camera.aspect = aspect;
 
     if (this.currentMode === 'CURVE') {
-      // Classic 2D Top-Down perspective directly above the square arena
+      // Classic 2D Top-Down perspective directly above the enlarged 4.8m square arena
       if (aspect < 1.0) {
-        // Portrait mobile: raise camera to fit 3.2m width comfortably
-        this.defaultFov = 50;
-        this.basePosition.set(0, 4.8 / aspect, 0);
+        // Portrait mobile: height scaled to fit 4.8m width
+        this.defaultFov = 52;
+        this.basePosition.set(0, 6.2 / aspect, 0);
         this.baseLookAt.set(0, 0, 0);
       } else {
-        // Landscape desktop: true top-down perpendicular view
-        this.defaultFov = 48;
-        this.basePosition.set(0, 4.4, 0);
+        // Landscape desktop: true top-down perpendicular view comfortably framing 4.8m
+        this.defaultFov = 50;
+        this.basePosition.set(0, 5.8, 0);
         this.baseLookAt.set(0, 0, 0);
       }
     } else {
+
       if (aspect < 1.0) {
         // Portrait mode (phones / tablets in vertical orientation):
         const aspectFactor = Math.min(1.75, Math.max(1.0, 0.86 / aspect));

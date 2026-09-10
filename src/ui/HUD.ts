@@ -238,11 +238,12 @@ export class HUD {
         curveBtn.classList.add('active');
         pongBtn.classList.remove('active');
         this.selectedGameMode = 'CURVE';
-        if (diffBox) diffBox.style.display = 'none'; // Curve mode bot has dynamic AI
+        if (diffBox) diffBox.style.display = 'flex'; // Allow choosing Novice, Pro, or Champion bot
         this.updateControlsHint();
         if (this.onGameModeSelect) this.onGameModeSelect('CURVE');
       });
     }
+
 
     // Touch Steering Zones
     if (this.curveLeftBtn && this.curveRightBtn) {
