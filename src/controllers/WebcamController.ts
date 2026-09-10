@@ -82,10 +82,11 @@ export class WebcamController {
       this.callbacks.onStatusChange('active');
       this.processLoop();
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Webcam initialization failed:', err);
+      const errMsg = err instanceof Error ? err.message : 'Could not access webcam';
       this.callbacks.onStatusChange('error');
-      this.callbacks.onError(err.message || 'Could not access webcam');
+      this.callbacks.onError(errMsg);
       this.stop();
       return false;
     }

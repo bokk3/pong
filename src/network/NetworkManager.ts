@@ -9,6 +9,12 @@ const STUN_SERVERS = [
   { urls: 'stun:global.stun.twilio.com:3478' }
 ];
 
+export interface CandidatePeer {
+  peerId: string;
+  username: string;
+  region?: string;
+}
+
 export class NetworkManager {
   private static instance: NetworkManager;
   private eventBus: EventBus;
@@ -79,7 +85,7 @@ export class NetworkManager {
         resolve(id.replace(PEER_PREFIX, ''));
       });
 
-      this.peer.on('error', (err: any) => {
+      this.peer.on('error', (err: Error & { type?: string }) => {
         console.warn('[NetworkManager] Peer error:', err);
         if (err.type === 'unavailable-id') {
           // Retry with random ID if collision
@@ -159,7 +165,7 @@ export class NetworkManager {
       this.reportPresence('playing');
     });
 
-    conn.on('data', (data: any) => {
+    conn.on('data', (data: unknown) => {
       try {
         const msg = typeof data === 'string' ? JSON.parse(data) as NetworkMessage : data as NetworkMessage;
         this.handleMessage(msg);
@@ -300,7 +306,7 @@ export class NetworkManager {
     }
   }
 
-  public async reportPresence(status: 'menu' | 'searching' | 'playing' | 'leave'): Promise<{ lookingCount: number; playingCount: number; candidates: any[] } | null> {
+  public async reportPresence(status: 'menu' | 'searching' | 'playing' | 'leave'): Promise<{ lookingCount: number; playingCount: number; candidates: CandidatePeer[] } | null> {
     try {
       const peerId = this.peer?.id || `${PEER_PREFIX}anon_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch('/api/presence', {

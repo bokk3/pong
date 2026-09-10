@@ -1,10 +1,11 @@
 import { GameEvents } from '../types';
 
 type EventCallback<T> = (data: T) => void;
+type GenericCallback = (data: unknown) => void;
 
 export class EventBus {
   private static instance: EventBus;
-  private listeners: Map<keyof GameEvents, Set<EventCallback<any>>> = new Map();
+  private listeners: Map<keyof GameEvents, Set<GenericCallback>> = new Map();
 
   private constructor() {}
 
@@ -19,14 +20,14 @@ export class EventBus {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(callback);
+    this.listeners.get(event)!.add(callback as GenericCallback);
     return () => this.off(event, callback);
   }
 
   public off<K extends keyof GameEvents>(event: K, callback: EventCallback<GameEvents[K]>): void {
     const callbacks = this.listeners.get(event);
     if (callbacks) {
-      callbacks.delete(callback);
+      callbacks.delete(callback as GenericCallback);
     }
   }
 

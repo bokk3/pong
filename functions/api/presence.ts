@@ -46,8 +46,9 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
     cleanupStalePeers();
 
     return getPresenceResponse(peerId);
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err?.message || 'Server error' }), {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
