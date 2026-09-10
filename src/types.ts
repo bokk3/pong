@@ -7,11 +7,12 @@ export type GameState =
   | 'RALLY'
   | 'POINT_SCORED'
   | 'MATCH_POINT'
+  | 'PAUSED'
   | 'GAME_OVER';
 
 export type PlayerId = 'PLAYER' | 'CPU';
 
-export type ShotRating = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'SMASH' | 'MISS';
+export type ShotRating = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'SMASH' | 'MISS' | 'ACE';
 
 export type SpinType = 'NONE' | 'TOPSPIN' | 'BACKSPIN' | 'SIDESPIN_LEFT' | 'SIDESPIN_RIGHT';
 

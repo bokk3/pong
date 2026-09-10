@@ -4,7 +4,7 @@ import { EventBus } from '../core/EventBus';
 export class HUD {
   private eventBus: EventBus;
 
-  // DOM Elements
+  // DOM Elements - Scoreboard
   private playerScoreEl: HTMLElement;
   private cpuScoreEl: HTMLElement;
   private playerCardEl: HTMLElement;
@@ -16,9 +16,27 @@ export class HUD {
   private calloutBannerEl: HTMLElement;
   private servePromptEl: HTMLElement;
 
+  // Settings & Webcam DOM Elements
+  private sensitivitySliderEl: HTMLInputElement;
+  private menuSensitivitySliderEl: HTMLInputElement;
+  private sensValEl: HTMLElement;
+  private menuSensValEl: HTMLElement;
+  private webcamToggleBtn: HTMLElement;
+  private menuWebcamToggleBtn: HTMLElement;
+  private webcamCloseBtn: HTMLElement;
+  private webcamPipEl: HTMLElement;
+  private webcamStatusBadgeEl: HTMLElement;
+  private webcamVideoEl: HTMLVideoElement;
+  private webcamOverlayCanvas: HTMLCanvasElement;
+
+  // Menu Overlays
   private mainMenuEl: HTMLElement;
+  private pauseMenuEl: HTMLElement;
   private gameOverEl: HTMLElement;
   private startBtn: HTMLElement;
+  private resumeBtn: HTMLElement;
+  private pauseRestartBtn: HTMLElement;
+  private pauseMenuBtn: HTMLElement;
   private rematchBtn: HTMLElement;
   private menuBtn: HTMLElement;
 
@@ -34,9 +52,13 @@ export class HUD {
   private feedbackTimeout: number | null = null;
   private calloutTimeout: number | null = null;
 
+  // Callbacks
   public onStartMatch: ((diff: Difficulty) => void) | null = null;
+  public onResume: (() => void) | null = null;
   public onRematch: (() => void) | null = null;
   public onReturnToMenu: (() => void) | null = null;
+  public onSensitivityChange: ((val: number) => void) | null = null;
+  public onToggleWebcam: (() => void) | null = null;
 
   constructor() {
     this.eventBus = EventBus.get();
@@ -52,9 +74,26 @@ export class HUD {
     this.calloutBannerEl = document.getElementById('callout-banner')!;
     this.servePromptEl = document.getElementById('serve-prompt')!;
 
+    // Settings & Webcam
+    this.sensitivitySliderEl = document.getElementById('sensitivity-slider') as HTMLInputElement;
+    this.menuSensitivitySliderEl = document.getElementById('menu-sensitivity-slider') as HTMLInputElement;
+    this.sensValEl = document.getElementById('sens-val')!;
+    this.menuSensValEl = document.getElementById('menu-sens-val')!;
+    this.webcamToggleBtn = document.getElementById('webcam-toggle-btn')!;
+    this.menuWebcamToggleBtn = document.getElementById('menu-webcam-toggle-btn')!;
+    this.webcamCloseBtn = document.getElementById('webcam-close-btn')!;
+    this.webcamPipEl = document.getElementById('webcam-pip')!;
+    this.webcamStatusBadgeEl = document.getElementById('webcam-status-badge')!;
+    this.webcamVideoEl = document.getElementById('webcam-video') as HTMLVideoElement;
+    this.webcamOverlayCanvas = document.getElementById('webcam-overlay') as HTMLCanvasElement;
+
     this.mainMenuEl = document.getElementById('main-menu')!;
+    this.pauseMenuEl = document.getElementById('pause-menu')!;
     this.gameOverEl = document.getElementById('game-over-screen')!;
     this.startBtn = document.getElementById('start-btn')!;
+    this.resumeBtn = document.getElementById('resume-btn')!;
+    this.pauseRestartBtn = document.getElementById('pause-restart-btn')!;
+    this.pauseMenuBtn = document.getElementById('pause-menu-btn')!;
     this.rematchBtn = document.getElementById('rematch-btn')!;
     this.menuBtn = document.getElementById('menu-btn')!;
 
@@ -81,9 +120,56 @@ export class HUD {
       });
     });
 
+    // Sensitivity Slider Synchronization
+    const handleSensInput = (val: number) => {
+      const formatted = `${val.toFixed(1)}x`;
+      this.sensValEl.textContent = formatted;
+      this.menuSensValEl.textContent = formatted;
+      this.sensitivitySliderEl.value = String(val);
+      this.menuSensitivitySliderEl.value = String(val);
+      if (this.onSensitivityChange) {
+        this.onSensitivityChange(val);
+      }
+    };
+
+    this.sensitivitySliderEl.addEventListener('input', (e) => {
+      handleSensInput(parseFloat((e.target as HTMLInputElement).value));
+    });
+
+    this.menuSensitivitySliderEl.addEventListener('input', (e) => {
+      handleSensInput(parseFloat((e.target as HTMLInputElement).value));
+    });
+
+    // Webcam toggle triggers
+    const triggerWebcam = () => {
+      if (this.onToggleWebcam) {
+        this.onToggleWebcam();
+      }
+    };
+
+    this.webcamToggleBtn.addEventListener('click', triggerWebcam);
+    this.menuWebcamToggleBtn.addEventListener('click', triggerWebcam);
+    this.webcamCloseBtn.addEventListener('click', triggerWebcam);
+
     this.startBtn.addEventListener('click', () => {
       this.hideMainMenu();
       if (this.onStartMatch) this.onStartMatch(this.selectedDifficulty);
+    });
+
+    this.resumeBtn.addEventListener('click', () => {
+      this.showPauseMenu(false);
+      if (this.onResume) this.onResume();
+    });
+
+    this.pauseRestartBtn.addEventListener('click', () => {
+      this.showPauseMenu(false);
+      if (this.onRematch) this.onRematch();
+    });
+
+    this.pauseMenuBtn.addEventListener('click', () => {
+      this.showPauseMenu(false);
+      this.showMainMenu();
+      if (this.onReturnToMenu) this.onReturnToMenu();
     });
 
     this.rematchBtn.addEventListener('click', () => {
@@ -114,6 +200,34 @@ export class HUD {
     });
   }
 
+  public setWebcamActive(active: boolean): void {
+    if (active) {
+      this.webcamPipEl.classList.add('active');
+      this.webcamToggleBtn.classList.add('active');
+      this.menuWebcamToggleBtn.classList.add('active');
+    } else {
+      this.webcamPipEl.classList.remove('active');
+      this.webcamToggleBtn.classList.remove('active');
+      this.menuWebcamToggleBtn.classList.remove('active');
+    }
+  }
+
+  public setWebcamStatus(statusText: string, isError: boolean = false): void {
+    this.webcamStatusBadgeEl.textContent = statusText;
+    if (isError) {
+      this.webcamStatusBadgeEl.classList.add('error');
+    } else {
+      this.webcamStatusBadgeEl.classList.remove('error');
+    }
+  }
+
+  public getWebcamElements(): { video: HTMLVideoElement; overlay: HTMLCanvasElement } {
+    return {
+      video: this.webcamVideoEl,
+      overlay: this.webcamOverlayCanvas
+    };
+  }
+
   public showMainMenu(): void {
     this.mainMenuEl.classList.add('active');
     this.servePromptEl.classList.remove('active');
@@ -121,6 +235,18 @@ export class HUD {
 
   public hideMainMenu(): void {
     this.mainMenuEl.classList.remove('active');
+  }
+
+  public showPauseMenu(show: boolean): void {
+    if (show) {
+      this.pauseMenuEl.classList.add('active');
+    } else {
+      this.pauseMenuEl.classList.remove('active');
+    }
+  }
+
+  public isPauseMenuOpen(): boolean {
+    return this.pauseMenuEl.classList.contains('active');
   }
 
   public showServePrompt(show: boolean): void {
@@ -132,7 +258,6 @@ export class HUD {
   }
 
   public updateScore(score: MatchScore): void {
-    // Check score bump
     if (this.playerScoreEl.textContent !== String(score.player)) {
       this.playerScoreEl.textContent = String(score.player);
       this.triggerBump(this.playerScoreEl);
@@ -142,7 +267,6 @@ export class HUD {
       this.triggerBump(this.cpuScoreEl);
     }
 
-    // Serve indicators
     if (score.server === 'PLAYER') {
       this.playerCardEl.classList.add('serving');
       this.cpuCardEl.classList.remove('serving');
@@ -151,10 +275,8 @@ export class HUD {
       this.playerCardEl.classList.remove('serving');
     }
 
-    // Rally Counter
     this.rallyCounterEl.textContent = `RALLY: ${score.rallyCount}`;
 
-    // Deuce / Match Point text
     if (score.player >= 10 && score.cpu >= 10) {
       this.matchInfoEl.textContent = 'DEUCE (WIN BY 2)';
     } else if (score.player >= 10 || score.cpu >= 10) {
@@ -176,6 +298,10 @@ export class HUD {
     let cls = '';
 
     switch (shot.rating) {
+      case 'ACE':
+        text = '⚡ ACE!';
+        cls = 'feedback-perfect';
+        break;
       case 'SMASH':
         text = '💥 SMASH!';
         cls = 'feedback-smash';

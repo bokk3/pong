@@ -73,7 +73,16 @@ export class PlayerController {
     // Keyboard support
     window.addEventListener('keydown', (e) => {
       this.keysPressed.add(e.code);
-      if (e.code === 'Space' || e.code === 'KeyJ') {
+      if (e.code === 'Space') {
+        // Support Z (topspin) and X (backspin) modifiers as listed in README
+        if (this.keysPressed.has('KeyZ')) {
+          this.attemptStrike('TOPSPIN', 1.25);
+        } else if (this.keysPressed.has('KeyX')) {
+          this.attemptStrike('BACKSPIN', 0.95);
+        } else {
+          this.attemptStrike('TOPSPIN', 1.15);
+        }
+      } else if (e.code === 'KeyJ') {
         this.attemptStrike('TOPSPIN', 1.15);
       } else if (e.code === 'KeyK') {
         this.attemptStrike('BACKSPIN', 0.95);
@@ -180,10 +189,25 @@ export class PlayerController {
       }
     }
 
-    // 2. Assisted Auto-Positioning
+    // 2. Keyboard Manual Movement (Arrow Keys & WASD as listed in README)
+    const keyMoveSpeed = 3.2 * this.sensitivity;
+    if (this.keysPressed.has('ArrowLeft') || this.keysPressed.has('KeyA')) {
+      this.manualOffset.x = Math.max(this.manualOffset.x - keyMoveSpeed * dt, -PADDLE_SPECS.MAX_REACH_X);
+    }
+    if (this.keysPressed.has('ArrowRight') || this.keysPressed.has('KeyD')) {
+      this.manualOffset.x = Math.min(this.manualOffset.x + keyMoveSpeed * dt, PADDLE_SPECS.MAX_REACH_X);
+    }
+    if (this.keysPressed.has('ArrowUp') || this.keysPressed.has('KeyW')) {
+      this.manualOffset.y = Math.max(this.manualOffset.y - keyMoveSpeed * dt * 0.4, -0.45); // forward towards table
+    }
+    if (this.keysPressed.has('ArrowDown') || this.keysPressed.has('KeyS')) {
+      this.manualOffset.y = Math.min(this.manualOffset.y + keyMoveSpeed * dt * 0.4, 0.4); // back away from table
+    }
+
+    // 3. Assisted Auto-Positioning
     let targetX = PADDLE_SPECS.PLAYER_DEFAULT_POS.x;
     let targetY = PADDLE_SPECS.PLAYER_DEFAULT_POS.y;
-    const targetZ = PADDLE_SPECS.PLAYER_DEFAULT_POS.z;
+    const targetZ = PADDLE_SPECS.PLAYER_DEFAULT_POS.z + this.manualOffset.y;
 
     if (ballVel.z > 0.4 && ballPos.z < 2.3) {
       const pred = TrajectoryPredictor.predictLanding(
@@ -331,4 +355,55 @@ export class PlayerController {
       launchY = 1.75;
     }
 
-    const flightTime = Math.abs((PHYSICS_CONST
+    const flightTime = Math.abs((PHYSICS_CONSTANTS.CPU_Z_MIN * 0.6) / launchZ);
+    const launchX = (targetX - ballPos.x) / flightTime;
+
+    this.ball.physics.velocity.set(launchX, launchY, launchZ);
+
+    const spinVector = new THREE.Vector3();
+    if (spinType === 'TOPSPIN' || isSmash) {
+      spinVector.x = isSmash ? 45 : 70;
+    } else if (spinType === 'BACKSPIN') {
+      spinVector.x = -50;
+    }
+
+    spinVector.y = -angleBias * 40;
+    this.ball.physics.spin.copy(spinVector);
+
+    this.eventBus.emit('ball:hit', {
+      hitter: 'PLAYER',
+      rating,
+      speed: this.ball.physics.velocity.length(),
+      spin: spinType,
+      isSmash,
+      contactPoint: ballPos.clone()
+    });
+
+    if (isSmash) {
+      this.eventBus.emit('camera:shake', { intensity: 0.08, duration: 0.35 });
+    }
+  }
+
+  public executeServe(): void {
+    this.ball.physics.reset(
+      new THREE.Vector3(0.15, 0.88, 1.55),
+      new THREE.Vector3(0, 1.6, 0),
+      new THREE.Vector3(0, 0, 0)
+    );
+
+    setTimeout(() => {
+      this.paddle.swing(true, 'TOPSPIN', 1.0);
+      this.ball.physics.velocity.set(0.1, -1.0, -5.5);
+      this.ball.physics.spin.set(25, 0, 0);
+
+      this.eventBus.emit('ball:hit', {
+        hitter: 'PLAYER',
+        rating: 'GOOD',
+        speed: 5.6,
+        spin: 'TOPSPIN',
+        isSmash: false,
+        contactPoint: this.ball.physics.position.clone()
+      });
+    }, 160);
+  }
+}

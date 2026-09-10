@@ -35,6 +35,18 @@
         </div>
       </div>
 
+      <!-- Quick Settings Toolbar (Sensitivity & Camera Toggle) -->
+      <div id="quick-settings">
+        <div class="setting-item">
+          <label for="sensitivity-slider">Sensitivity: <span id="sens-val">1.2x</span></label>
+          <input type="range" id="sensitivity-slider" min="0.5" max="2.5" step="0.1" value="1.2" />
+        </div>
+        <button id="webcam-toggle-btn" class="arcade-toggle-btn" title="Toggle Webcam Hand-Swipe Control">
+          <span class="cam-icon">📷</span>
+          <span class="cam-label">Webcam Hand-Swipe <span class="beta-tag">BETA</span></span>
+        </button>
+      </div>
+
       <!-- Controls & Spin HUD Helper -->
       <div id="controls-hint">
         <div class="hint-item"><span class="key">Mouse Flick</span> or <span class="key">Space</span> Swing</div>
@@ -54,6 +66,21 @@
         <div class="serve-icon">🏓</div>
         <div class="serve-text">CLICK OR PRESS SPACE TO SERVE</div>
         <div class="serve-subtext">Flick or swipe upward for topspin serve</div>
+      </div>
+
+      <!-- Webcam Motion PIP (Picture-In-Picture) -->
+      <div id="webcam-pip" class="webcam-pip">
+        <div class="pip-header">
+          <span class="pip-badge" id="webcam-status-badge">INITIALIZING...</span>
+          <button id="webcam-close-btn" class="pip-close-btn" title="Close Camera">✕</button>
+        </div>
+        <div class="pip-video-wrap">
+          <video id="webcam-video" autoplay playsinline muted></video>
+          <canvas id="webcam-overlay" width="160" height="120"></canvas>
+        </div>
+        <div class="pip-footer">
+          <span class="pip-tip">👋 Swipe hand UP for topspin, DOWN for slice</span>
+        </div>
       </div>
     </div>
 
@@ -85,6 +112,17 @@
           </div>
         </div>
 
+        <div class="menu-settings-box">
+          <div class="menu-setting-row">
+            <label>Controls Sensitivity: <span id="menu-sens-val">1.2x</span></label>
+            <input type="range" id="menu-sensitivity-slider" min="0.5" max="2.5" step="0.1" value="1.2" />
+          </div>
+          <button id="menu-webcam-toggle-btn" class="arcade-toggle-btn large">
+            <span class="cam-icon">📷</span>
+            <span class="cam-label">Enable Webcam Hand-Swipe Mode <span class="beta-tag">BETA</span></span>
+          </button>
+        </div>
+
         <div class="menu-actions">
           <button id="start-btn" class="primary-btn">PLAY MATCH</button>
         </div>
@@ -99,9 +137,22 @@
             <p>Hit early for cross-court angles, late for down-the-line shots, or center for deep baseline winners.</p>
           </div>
           <div class="guide-col">
-            <h4>🌀 Gesture Spin</h4>
-            <p>Flick mouse up for diving topspin, flick down for floating backspin slice.</p>
+            <h4>🌀 Gesture / Webcam Spin</h4>
+            <p>Flick mouse or swipe hand UP for topspin dive, DOWN for floating backspin slice.</p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause Menu Overlay -->
+    <div id="pause-menu" class="overlay-screen">
+      <div class="menu-card pause-card">
+        <div class="result-title">PAUSED</div>
+        <p class="tagline">Game is paused — press ESC to resume</p>
+        <div class="menu-actions">
+          <button id="resume-btn" class="primary-btn">RESUME</button>
+          <button id="pause-restart-btn" class="secondary-btn">RESTART MATCH</button>
+          <button id="pause-menu-btn" class="secondary-btn">MAIN MENU</button>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { Ball } from '../entities/Ball';
 import { Paddle } from '../entities/Paddle';
 import { PlayerController } from '../controllers/PlayerController';
 import { AIController } from '../controllers/AIController';
+import { WebcamController } from '../controllers/WebcamController';
 import { CameraController } from '../vfx/CameraController';
 import { VFXManager } from '../vfx/VFXManager';
 import { SoundEngine } from '../audio/SoundEngine';
@@ -29,6 +30,7 @@ export class Game {
   // Controllers & Systems
   private playerCtrl: PlayerController;
   private aiCtrl: AIController;
+  private webcamCtrl: WebcamController;
   private vfx: VFXManager;
   private sound: SoundEngine;
   private hud: HUD;
@@ -40,6 +42,7 @@ export class Game {
   private timeScale: number = 1.0;
   private freezeFrames: number = 0;
   private isRunning: boolean = false;
+  private isPaused: boolean = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -87,7 +90,35 @@ export class Game {
     this.stateMachine = new StateMachine();
     this.hud = new HUD();
 
-    // 5. Connect Systems
+    // 5. Webcam Controller
+    this.webcamCtrl = new WebcamController({
+      onMotionPosition: (normX) => {
+        this.playerCtrl.setExternalMotion(normX);
+      },
+      onSwipeStrike: (spin, power, isSmash, angleBias) => {
+        if (this.stateMachine.state === 'SERVE_WAIT' && this.stateMachine.score.server === 'PLAYER') {
+          this.playerCtrl.executeServe();
+        } else if (this.stateMachine.state === 'RALLY') {
+          this.playerCtrl.triggerExternalStrike(spin, power, isSmash, angleBias);
+        }
+      },
+      onError: (errMsg) => {
+        this.hud.setWebcamStatus('ERROR: ' + errMsg, true);
+        this.hud.showCallout('WEBCAM: ' + errMsg, 2000);
+      },
+      onStatusChange: (status) => {
+        if (status === 'starting') {
+          this.hud.setWebcamStatus('CONNECTING...', false);
+        } else if (status === 'active') {
+          this.hud.setWebcamStatus('CAMERA ACTIVE', false);
+          this.hud.showCallout('📷 WEBCAM MODE ACTIVE!', 1500);
+        } else if (status === 'inactive') {
+          this.hud.setWebcamStatus('DISABLED', false);
+        }
+      }
+    });
+
+    // 6. Connect Systems
     this.setupEventHandlers();
     this.setupWindowEvents();
   }
@@ -96,6 +127,40 @@ export class Game {
     // Audio trigger on user gesture
     window.addEventListener('pointerdown', () => this.sound.init(), { once: true });
     window.addEventListener('keydown', () => this.sound.init(), { once: true });
+
+    // Sensitivity control
+    this.hud.onSensitivityChange = (sens) => {
+      this.playerCtrl.sensitivity = sens;
+    };
+
+    // Webcam mode toggle
+    this.hud.onToggleWebcam = async () => {
+      if (this.playerCtrl.isWebcamMode) {
+        this.webcamCtrl.stop();
+        this.playerCtrl.isWebcamMode = false;
+        this.hud.setWebcamActive(false);
+        const { video } = this.hud.getWebcamElements();
+        video.srcObject = null;
+        this.hud.showCallout('MOUSE CONTROLS ACTIVE', 1200);
+      } else {
+        this.hud.setWebcamActive(true);
+        const { video, overlay } = this.hud.getWebcamElements();
+        this.webcamCtrl.setOverlayCanvas(overlay);
+        const started = await this.webcamCtrl.start();
+        if (started) {
+          video.srcObject = this.webcamCtrl.getVideoStream();
+          this.playerCtrl.isWebcamMode = true;
+        } else {
+          this.hud.setWebcamActive(false);
+          this.playerCtrl.isWebcamMode = false;
+        }
+      }
+    };
+
+    this.hud.onResume = () => {
+      this.isPaused = false;
+      this.lastTime = performance.now();
+    };
 
     // HUD Menu Actions
     this.hud.onStartMatch = (diff: Difficulty) => {
@@ -106,11 +171,15 @@ export class Game {
     };
 
     this.hud.onRematch = () => {
+      this.isPaused = false;
+      this.hud.showPauseMenu(false);
       this.stateMachine.resetMatch();
       this.startMatchSequence();
     };
 
     this.hud.onReturnToMenu = () => {
+      this.isPaused = false;
+      this.hud.showPauseMenu(false);
       this.ball.physics.stop();
       this.stateMachine.setState('MENU');
     };
@@ -136,6 +205,15 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.stateMachine.score.server === 'PLAYER') {
         this.playerCtrl.executeServe();
+      }
+      if (e.code === 'Escape') {
+        if (this.stateMachine.state !== 'MENU' && this.stateMachine.state !== 'GAME_OVER') {
+          this.isPaused = !this.isPaused;
+          this.hud.showPauseMenu(this.isPaused);
+          if (!this.isPaused) {
+            this.lastTime = performance.now();
+          }
+        }
       }
     });
 
@@ -179,7 +257,19 @@ export class Game {
       this.sound.playCheer();
 
       if (winner === 'PLAYER') {
-        this.hud.showCallout(`POINT TO YOU! (${reason})`, 1000);
+        if (reason === 'ACE!') {
+          this.hud.showShotFeedback({
+            hitter: 'PLAYER',
+            rating: 'ACE',
+            speed: 0,
+            spin: 'NONE',
+            isSmash: false,
+            contactPoint: this.ball.physics.position.clone()
+          });
+          this.hud.showCallout(`⚡ SERVICE ACE!`, 1300);
+        } else {
+          this.hud.showCallout(`POINT TO YOU! (${reason})`, 1000);
+        }
       } else {
         this.hud.showCallout(`CPU SCORED (${reason})`, 1000);
       }
@@ -223,6 +313,11 @@ export class Game {
     const rawDelta = Math.min((currentTime - this.lastTime) / 1000, 0.05);
     this.lastTime = currentTime;
 
+    if (this.isPaused) {
+      this.renderer.render(this.scene, this.cameraCtrl.camera);
+      return;
+    }
+
     // Freeze frame pause on powerful smashes
     if (this.freezeFrames > 0) {
       this.freezeFrames--;
@@ -230,7 +325,7 @@ export class Game {
       return;
     }
 
-    // Match point dramatic slow motion (0.5x)
+    // Match point dramatic slow motion (0.85x)
     const isMatchPoint = this.stateMachine.score.player >= 10 || this.stateMachine.score.cpu >= 10;
     const targetScale = (isMatchPoint && this.stateMachine.state === 'RALLY') ? 0.85 : 1.0;
     this.timeScale = THREE.MathUtils.lerp(this.timeScale, targetScale, rawDelta * 5);

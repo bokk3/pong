@@ -118,7 +118,8 @@ export class StateMachine {
       } else {
         // Double bounce on opponent table -> Opponent failed to return in time!
         const winner = this.lastHitter!;
-        this.awardPoint(winner, 'DOUBLE BOUNCE');
+        const isAce = this.score.rallyCount === 0 && this.lastHitter === this.score.server;
+        this.awardPoint(winner, isAce ? 'ACE!' : 'DOUBLE BOUNCE');
       }
     } else if (surface === ownSide) {
       // Ball bounced back onto striker's own table -> Fault!
@@ -129,7 +130,8 @@ export class StateMachine {
       if (this.hasBouncedOnReceiverSide) {
         // Bounced on receiver's table, receiver failed to hit before floor -> striker wins!
         const winner = this.lastHitter!;
-        this.awardPoint(winner, 'WINNER');
+        const isAce = this.score.rallyCount === 0 && this.lastHitter === this.score.server;
+        this.awardPoint(winner, isAce ? 'ACE!' : 'WINNER');
       } else {
         // Struck ball went straight out to floor without landing on opponent table -> striker loses!
         const winner = this.lastHitter === 'PLAYER' ? 'CPU' : 'PLAYER';
