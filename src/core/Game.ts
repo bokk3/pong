@@ -278,19 +278,35 @@ export class Game {
       }
     });
 
-    // Keyboard Steering for Curve Mode & Space Serve for Pong
-    window.addEventListener('keydown', (e) => {
-      if (this.gameModeType === 'CURVE' && (this.stateMachine.state === 'RALLY' || this.curveMode.roundState === 'PLAYING' || this.curveMode.roundState === 'COUNTDOWN')) {
-        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+    // Real-Time Keyboard Steering for Curve Mode & Space Serve for Pong
+    const curveKeys = { left: false, right: false };
+
+    const updateCurveSteering = () => {
+      if (this.gameModeType === 'CURVE') {
+        if (curveKeys.left && !curveKeys.right) {
           this.curveMode.handleLocalSteering(-1);
-        } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+        } else if (curveKeys.right && !curveKeys.left) {
           this.curveMode.handleLocalSteering(1);
+        } else {
+          this.curveMode.handleLocalSteering(0);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (this.gameModeType === 'CURVE') {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          curveKeys.left = true;
+          updateCurveSteering();
+        } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          curveKeys.right = true;
+          updateCurveSteering();
         }
       } else if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
-      if (e.code === 'Escape') {
 
+      if (e.code === 'Escape') {
         if (this.stateMachine.state !== 'MENU' && this.stateMachine.state !== 'GAME_OVER') {
           this.isPaused = !this.isPaused;
           this.hud.showPauseMenu(this.isPaused);
@@ -300,6 +316,19 @@ export class Game {
         }
       }
     });
+
+    window.addEventListener('keyup', (e) => {
+      if (this.gameModeType === 'CURVE') {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          curveKeys.left = false;
+          updateCurveSteering();
+        } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          curveKeys.right = false;
+          updateCurveSteering();
+        }
+      }
+    });
+
 
     this.canvas.addEventListener('pointerdown', () => {
       if (this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {

@@ -12,13 +12,14 @@ export interface CurveConfig {
 }
 
 const DEFAULT_CONFIG: CurveConfig = {
-  speed: 1.6, // units/sec forward speed
-  turnSpeed: 3.3, // rad/s turning rate
+  speed: 1.45, // balanced forward speed for snappy response
+  turnSpeed: 4.6, // rad/s snappy arcade steering rate
   gapIntervalMin: 2.2, // seconds between gaps
   gapIntervalMax: 4.2,
   gapDuration: 0.28, // seconds gap lasts
   headRadius: 0.024 // head collision radius
 };
+
 
 // Distance from point to line segment
 function distToSegment(
