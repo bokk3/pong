@@ -78,6 +78,18 @@
       <!-- Floating Shot Feedback ("PERFECT!", "SMASH!", "TOO EARLY") -->
       <div id="feedback-banner" class="feedback-banner"></div>
 
+      <!-- Curve Battle Touch Steering Zones (Mobile / Touchscreen) -->
+      <div id="curve-touch-controls" class="curve-touch-controls" style="display: none;">
+        <button id="curve-left-btn" class="curve-touch-btn curve-left-btn" aria-label="Turn Left">
+          <span class="steer-arrow">◀</span>
+          <span class="steer-label">TURN LEFT</span>
+        </button>
+        <button id="curve-right-btn" class="curve-touch-btn curve-right-btn" aria-label="Turn Right">
+          <span class="steer-label">TURN RIGHT</span>
+          <span class="steer-arrow">▶</span>
+        </button>
+      </div>
+
       <!-- Big Center Callout ("SERVE", "MATCH POINT", "DEUCE") -->
       <div id="callout-banner" class="callout-banner"></div>
 
@@ -215,12 +227,31 @@
               </div>
             </div>
 
+            <div class="sidebar-group">
+              <div class="group-title">
+                <span class="group-icon">🐍</span> CURVE BATTLE (ACHTUNG)
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Turn Left</span>
+                <span class="key-combo"><span class="key">A</span> <span class="subtext">or</span> <span class="key">←</span> <span class="subtext">/</span> <span class="hint-tag">Tap Left Side</span></span>
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Turn Right</span>
+                <span class="key-combo"><span class="key">D</span> <span class="subtext">or</span> <span class="key">→</span> <span class="subtext">/</span> <span class="hint-tag">Tap Right Side</span></span>
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Jump Gaps</span>
+                <span class="key-combo"><span class="hint-tag">Slip through trail holes</span></span>
+              </div>
+            </div>
+
             <div class="sidebar-group tips-card">
               <div class="group-title">
                 <span class="group-icon">⚡</span> RALLY PRO TIPS
               </div>
               <ul class="tips-list">
                 <li>Wait for the ball to <strong>bounce once</strong> on your table before swinging!</li>
+
                 <li><strong>Hit Early</strong> for sharp cross-court angles.</li>
                 <li><strong>Hit Late</strong> for down-the-line sidelines.</li>
                 <li><strong>Topspin</strong> pulls the ball down sharply onto the opponent's table.</li>
@@ -256,7 +287,28 @@
             </div>
           </div>
           
-          <div class="difficulty-picker">
+          <!-- Game Mode Selector -->
+          <div class="gamemode-picker">
+            <label>SELECT GAME MODE</label>
+            <div class="gamemode-buttons">
+              <button class="gamemode-btn active" id="mode-pong-btn" data-mode="PONG">
+                <span class="gamemode-icon">🏓</span>
+                <span class="gamemode-text">
+                  <span class="gamemode-title">CLASSIC PONG</span>
+                  <span class="gamemode-desc">Arcade spin & rallies</span>
+                </span>
+              </button>
+              <button class="gamemode-btn" id="mode-curve-btn" data-mode="CURVE">
+                <span class="gamemode-icon">🐍</span>
+                <span class="gamemode-text">
+                  <span class="gamemode-title">CURVE BATTLE</span>
+                  <span class="gamemode-desc">Achtung die Kurve 3D</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="difficulty-picker" id="difficulty-picker-box">
             <label>CHOOSE YOUR OPPONENT</label>
             <div class="difficulty-buttons">
               <button class="diff-btn" data-diff="novice">
@@ -273,6 +325,7 @@
               </button>
             </div>
           </div>
+
 
           <div class="menu-settings-box">
             <div class="menu-setting-row">

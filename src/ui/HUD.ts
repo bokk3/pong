@@ -93,14 +93,22 @@ export class HUD {
   private feedbackTimeout: number | null = null;
   private calloutTimeout: number | null = null;
   private currentMode: 'BOT' | 'MULTIPLAYER' = 'BOT';
+  public selectedGameMode: 'PONG' | 'CURVE' = 'PONG';
   private localRematchRequested: boolean = false;
   private remoteRematchRequested: boolean = false;
   private matchmakingPollTimer: number | null = null;
   private isStartingMatch: boolean = false;
 
+  // Touch controls for Curve
+  private curveTouchControlsEl: HTMLElement | null = null;
+  private curveLeftBtn: HTMLElement | null = null;
+  private curveRightBtn: HTMLElement | null = null;
+
   // Callbacks
   public onStartMatch: ((diff: Difficulty) => void) | null = null;
   public onStartMultiplayerMatch: ((role: MultiplayerRole, remoteUsername: string) => void) | null = null;
+  public onGameModeSelect: ((mode: 'PONG' | 'CURVE') => void) | null = null;
+  public onCurveSteer: ((dir: -1 | 0 | 1) => void) | null = null;
   public onResume: (() => void) | null = null;
   public onRematch: (() => void) | null = null;
   public onReturnToMenu: (() => void) | null = null;
@@ -111,6 +119,7 @@ export class HUD {
     this.eventBus = EventBus.get();
     this.network = NetworkManager.get();
     this.deviceDetector = DeviceDetector.get();
+
 
     // Scoreboard
     this.playerScoreEl = document.getElementById('player-score')!;
@@ -130,6 +139,11 @@ export class HUD {
     this.controlsSidebarEl = document.getElementById('controls-sidebar')!;
     this.mobileGuideBtn = document.getElementById('mobile-guide-btn');
     this.sidebarCloseBtn = document.getElementById('sidebar-close-btn');
+
+    // Curve Touch Controls
+    this.curveTouchControlsEl = document.getElementById('curve-touch-controls');
+    this.curveLeftBtn = document.getElementById('curve-left-btn');
+    this.curveRightBtn = document.getElementById('curve-right-btn');
 
     // Presence
     this.queueCountEl = document.getElementById('queue-count')!;
@@ -205,6 +219,59 @@ export class HUD {
   }
 
   private setupUIEvents(): void {
+    // Game Mode Selector (Classic Pong vs Curve Battle)
+    const pongBtn = document.getElementById('mode-pong-btn');
+    const curveBtn = document.getElementById('mode-curve-btn');
+    const diffBox = document.getElementById('difficulty-picker-box');
+
+    if (pongBtn && curveBtn) {
+      pongBtn.addEventListener('click', () => {
+        pongBtn.classList.add('active');
+        curveBtn.classList.remove('active');
+        this.selectedGameMode = 'PONG';
+        if (diffBox) diffBox.style.display = 'flex';
+        this.updateControlsHint();
+        if (this.onGameModeSelect) this.onGameModeSelect('PONG');
+      });
+
+      curveBtn.addEventListener('click', () => {
+        curveBtn.classList.add('active');
+        pongBtn.classList.remove('active');
+        this.selectedGameMode = 'CURVE';
+        if (diffBox) diffBox.style.display = 'none'; // Curve mode bot has dynamic AI
+        this.updateControlsHint();
+        if (this.onGameModeSelect) this.onGameModeSelect('CURVE');
+      });
+    }
+
+    // Touch Steering Zones
+    if (this.curveLeftBtn && this.curveRightBtn) {
+      const startLeft = (e: Event) => {
+        e.preventDefault();
+        if (this.onCurveSteer) this.onCurveSteer(-1);
+      };
+      const stopLeft = (e: Event) => {
+        e.preventDefault();
+        if (this.onCurveSteer) this.onCurveSteer(0);
+      };
+      const startRight = (e: Event) => {
+        e.preventDefault();
+        if (this.onCurveSteer) this.onCurveSteer(1);
+      };
+      const stopRight = (e: Event) => {
+        e.preventDefault();
+        if (this.onCurveSteer) this.onCurveSteer(0);
+      };
+
+      this.curveLeftBtn.addEventListener('pointerdown', startLeft);
+      this.curveLeftBtn.addEventListener('pointerup', stopLeft);
+      this.curveLeftBtn.addEventListener('pointercancel', stopLeft);
+
+      this.curveRightBtn.addEventListener('pointerdown', startRight);
+      this.curveRightBtn.addEventListener('pointerup', stopRight);
+      this.curveRightBtn.addEventListener('pointercancel', stopRight);
+    }
+
     // Mobile How-to-Play Guide Drawer
     if (this.mobileGuideBtn) {
       this.mobileGuideBtn.addEventListener('click', () => {
@@ -436,10 +503,52 @@ export class HUD {
       this.showGameOver(winner, score);
     });
 
+    this.eventBus.on('curve:round_start', ({ roundNumber }) => {
+      this.rallyCounterEl.textContent = `ROUND ${roundNumber}`;
+      this.matchInfoEl.textContent = 'FIRST TO 5';
+      this.showCallout(`ROUND ${roundNumber}`, 1100);
+      if (this.deviceDetector.info.isTouchDevice) {
+        if (this.curveTouchControlsEl) this.curveTouchControlsEl.style.display = 'flex';
+      }
+    });
+
+
+    this.eventBus.on('curve:score', (score) => {
+      this.playerScoreEl.textContent = String(score.player);
+      this.cpuScoreEl.textContent = String(score.cpu);
+      this.matchInfoEl.textContent = `FIRST TO ${score.targetScore}`;
+    });
+
+    this.eventBus.on('curve:crash', ({ victim }) => {
+      if (victim === 'PLAYER') {
+        this.showCallout('YOU CRASHED!', 1200);
+      } else {
+        const oppName = this.currentMode === 'MULTIPLAYER' ? this.network.remoteUsername.toUpperCase() : 'BOT';
+        this.showCallout(`${oppName} CRASHED!`, 1200);
+      }
+    });
+
+    this.eventBus.on('curve:match_over', ({ winner, score }) => {
+      if (this.curveTouchControlsEl) this.curveTouchControlsEl.style.display = 'none';
+      const fakeMatchScore: MatchScore = {
+        player: score.player,
+        cpu: score.cpu,
+        server: 'PLAYER',
+        consecutiveServes: 0,
+        rallyCount: 0,
+        longestRally: Math.max(score.player, score.cpu),
+        smashWinners: 0,
+        totalPlayerShots: score.player + score.cpu,
+        goodOrBetterShots: score.player
+      };
+      this.showGameOver(winner, fakeMatchScore);
+    });
+
     this.eventBus.on('device:resize', () => {
       this.updateControlsHint();
     });
   }
+
 
   private setupNetworkListeners(): void {
     // Ping listener
@@ -634,22 +743,39 @@ export class HUD {
 
   private updateControlsHint(): void {
     if (!this.controlsHintEl) return;
-    if (this.deviceDetector.info.isTouchDevice) {
-      this.controlsHintEl.innerHTML = `
-        <div class="hint-item"><span class="key">Slide</span> Move</div>
-        <div class="hint-item"><span class="key">Swipe ↑</span> Topspin</div>
-        <div class="hint-item"><span class="key">Swipe ↓</span> Slice</div>
-        <div class="hint-item"><span class="key">Tap</span> Hit / Serve</div>
-      `;
+    if (this.selectedGameMode === 'CURVE') {
+      if (this.deviceDetector.info.isTouchDevice) {
+        this.controlsHintEl.innerHTML = `
+          <div class="hint-item"><span class="key">Left Zone</span> Turn Left</div>
+          <div class="hint-item"><span class="key">Right Zone</span> Turn Right</div>
+          <div class="hint-item"><span class="key">Avoid Trails</span> Survive!</div>
+        `;
+      } else {
+        this.controlsHintEl.innerHTML = `
+          <div class="hint-item"><span class="key">A</span> / <span class="key">←</span> Turn Left</div>
+          <div class="hint-item"><span class="key">D</span> / <span class="key">→</span> Turn Right</div>
+          <div class="hint-item"><span class="key">Jump Gaps</span> Survive!</div>
+        `;
+      }
     } else {
-      this.controlsHintEl.innerHTML = `
-        <div class="hint-item"><span class="key">Mouse Flick</span> or <span class="key">Space</span> Swing</div>
-        <div class="hint-item"><span class="key">↑ Flick</span> / <span class="key">J</span> Topspin</div>
-        <div class="hint-item"><span class="key">↓ Flick</span> / <span class="key">K</span> Slice</div>
-        <div class="hint-item"><span class="key">L</span> Smash</div>
-      `;
+      if (this.deviceDetector.info.isTouchDevice) {
+        this.controlsHintEl.innerHTML = `
+          <div class="hint-item"><span class="key">Slide</span> Move</div>
+          <div class="hint-item"><span class="key">Swipe ↑</span> Topspin</div>
+          <div class="hint-item"><span class="key">Swipe ↓</span> Slice</div>
+          <div class="hint-item"><span class="key">Tap</span> Hit / Serve</div>
+        `;
+      } else {
+        this.controlsHintEl.innerHTML = `
+          <div class="hint-item"><span class="key">Mouse Flick</span> or <span class="key">Space</span> Swing</div>
+          <div class="hint-item"><span class="key">↑ Flick</span> / <span class="key">J</span> Topspin</div>
+          <div class="hint-item"><span class="key">↓ Flick</span> / <span class="key">K</span> Slice</div>
+          <div class="hint-item"><span class="key">L</span> Smash</div>
+        `;
+      }
     }
   }
+
 
   private generateRandomNickname(): string {
     const adjectives = ['Apex', 'Vortex', 'Spin', 'Cyber', 'Sonic', 'Flash', 'Hyper', 'Turbo', 'Neon'];

@@ -9,7 +9,11 @@ export type NetworkMessageType =
   | 'POINT_SCORED'
   | 'REMATCH_REQUEST'
   | 'PING'
-  | 'PONG';
+  | 'PONG'
+  | 'CURVE_INPUT'
+  | 'CURVE_ROUND_START'
+  | 'CURVE_CRASH'
+  | 'CURVE_SCORE_SYNC';
 
 export interface HandshakeMessage {
   type: 'HANDSHAKE';
@@ -71,6 +75,36 @@ export interface PongMessage {
   timestamp: number;
 }
 
+export interface CurveInputMessage {
+  type: 'CURVE_INPUT';
+  x: number;
+  z: number;
+  angle: number;
+  steering: -1 | 0 | 1;
+  isDrawing: boolean;
+}
+
+export interface CurveRoundStartMessage {
+  type: 'CURVE_ROUND_START';
+  roundNumber: number;
+  p1Spawn: { x: number; z: number; angle: number };
+  p2Spawn: { x: number; z: number; angle: number };
+  countdownMs: number;
+}
+
+export interface CurveCrashMessage {
+  type: 'CURVE_CRASH';
+  victim: PlayerId;
+  x: number;
+  z: number;
+}
+
+export interface CurveScoreSyncMessage {
+  type: 'CURVE_SCORE_SYNC';
+  player: number;
+  cpu: number;
+}
+
 export type NetworkMessage =
   | HandshakeMessage
   | PaddleMoveMessage
@@ -80,4 +114,9 @@ export type NetworkMessage =
   | PointScoredMessage
   | RematchMessage
   | PingMessage
-  | PongMessage;
+  | PongMessage
+  | CurveInputMessage
+  | CurveRoundStartMessage
+  | CurveCrashMessage
+  | CurveScoreSyncMessage;
+

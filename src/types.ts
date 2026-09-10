@@ -77,6 +77,23 @@ export interface DeviceInfo {
   screenHeight: number;
 }
 
+export type GameModeType = 'PONG' | 'CURVE';
+
+export interface CurveScore {
+  player: number;
+  cpu: number;
+  targetScore: number;
+}
+
+export interface CurvePlayerState {
+  id: PlayerId;
+  x: number;
+  z: number;
+  angle: number;
+  isAlive: boolean;
+  isDrawing: boolean;
+}
+
 export type GameEvents = {
   'state:changed': { from: GameState; to: GameState };
   'score:updated': MatchScore;
@@ -92,4 +109,9 @@ export type GameEvents = {
   'multiplayer:rematch': { from: 'local' | 'remote'; status: 'requested' | 'accepted' | 'declined' };
   'device:orientation': { orientation: 'portrait' | 'landscape'; isPortrait: boolean };
   'device:resize': DeviceInfo;
+  'curve:score': CurveScore;
+  'curve:crash': { victim: PlayerId; x: number; z: number };
+  'curve:round_start': { roundNumber: number };
+  'curve:match_over': { winner: PlayerId; score: CurveScore };
 };
+

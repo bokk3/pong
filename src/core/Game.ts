@@ -12,10 +12,11 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { HUD } from '../ui/HUD';
 import { StateMachine } from './StateMachine';
 import { EventBus } from './EventBus';
-import { Difficulty, GameMode, MultiplayerRole, PlayerId } from '../types';
+import { Difficulty, GameMode, GameModeType, MultiplayerRole, PlayerId } from '../types';
 import { NetworkManager } from '../network/NetworkManager';
 import { RemotePlayerController } from '../controllers/RemotePlayerController';
 import { NetworkMessage } from '../network/NetworkProtocol';
+import { CurveGameMode } from './CurveGameMode';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -29,6 +30,10 @@ export class Game {
   private ball: Ball;
   private playerPaddle: Paddle;
   private cpuPaddle: Paddle;
+
+  // Curve Mode
+  private curveMode: CurveGameMode;
+  public gameModeType: GameModeType = 'PONG';
 
   // Controllers & Systems
   private playerCtrl: PlayerController;
@@ -45,6 +50,7 @@ export class Game {
 
   // Loop & Timing
   private lastTime: number = 0;
+
   private timeScale: number = 1.0;
   private freezeFrames: number = 0;
   private isRunning: boolean = false;
@@ -85,6 +91,11 @@ export class Game {
     this.scene.add(this.playerPaddle.group);
     this.scene.add(this.cpuPaddle.group);
 
+    // Instantiate Curve Mode
+    this.curveMode = new CurveGameMode();
+    this.curveMode.group.visible = false;
+    this.scene.add(this.curveMode.group);
+
     // 3. Audio & VFX
     this.sound = SoundEngine.get();
     this.vfx = new VFXManager();
@@ -97,6 +108,7 @@ export class Game {
     this.stateMachine = new StateMachine();
     this.hud = new HUD();
     this.network = NetworkManager.get();
+
 
     // Broadcast local paddle position at 60Hz over WebRTC DataChannel
     this.playerCtrl.onPaddlePositionUpdate = (x, y, z, isForehand, isSwinging) => {
@@ -184,28 +196,48 @@ export class Game {
     };
 
     // HUD Menu Actions
+    this.hud.onGameModeSelect = (modeType: GameModeType) => {
+      this.gameModeType = modeType;
+    };
+
+    this.hud.onCurveSteer = (dir: -1 | 0 | 1) => {
+      if (this.gameModeType === 'CURVE') {
+        this.curveMode.handleLocalSteering(dir);
+      }
+    };
+
     this.hud.onStartMatch = (diff: Difficulty) => {
       this.sound.init();
       this.mode = 'BOT';
-      this.hud.setOpponentName(`CPU (${diff.toUpperCase()})`);
-      this.aiCtrl.setDifficulty(diff);
-      this.stateMachine.resetMatch();
-      this.startMatchSequence();
+      if (this.gameModeType === 'CURVE') {
+        this.startCurveMatch(false);
+      } else {
+        this.hud.setOpponentName(`CPU (${diff.toUpperCase()})`);
+        this.aiCtrl.setDifficulty(diff);
+        this.stateMachine.resetMatch();
+        this.startMatchSequence();
+      }
     };
 
     this.hud.onStartMultiplayerMatch = (_role: MultiplayerRole, remoteUsername: string) => {
       this.sound.init();
       this.mode = 'MULTIPLAYER';
-      this.hud.setOpponentName(remoteUsername);
-      this.remotePlayerCtrl.resetPosition();
-      this.stateMachine.resetMatch();
-      this.startMatchSequence();
+      if (this.gameModeType === 'CURVE') {
+        this.startCurveMatch(true);
+      } else {
+        this.hud.setOpponentName(remoteUsername);
+        this.remotePlayerCtrl.resetPosition();
+        this.stateMachine.resetMatch();
+        this.startMatchSequence();
+      }
     };
 
     this.hud.onRematch = () => {
       this.isPaused = false;
       this.hud.showPauseMenu(false);
-      if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
+      if (this.gameModeType === 'CURVE') {
+        this.startCurveMatch(this.mode === 'MULTIPLAYER');
+      } else if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
         this.network.send({ type: 'REMATCH_REQUEST', status: 'requested' });
         this.eventBus.emit('multiplayer:rematch', { from: 'local', status: 'requested' });
       } else {
@@ -222,6 +254,9 @@ export class Game {
         this.network.disconnect();
       }
       this.mode = 'BOT';
+      this.setEntitiesVisibility(true);
+      this.curveMode.group.visible = false;
+      this.cameraCtrl.setMode('PONG');
       this.stateMachine.setState('MENU');
     };
 
@@ -242,12 +277,19 @@ export class Game {
       }
     });
 
-    // Space / Click for player serve
+    // Keyboard Steering for Curve Mode & Space Serve for Pong
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
+      if (this.gameModeType === 'CURVE' && (this.stateMachine.state === 'RALLY' || this.curveMode.roundState === 'PLAYING' || this.curveMode.roundState === 'COUNTDOWN')) {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          this.curveMode.handleLocalSteering(-1);
+        } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          this.curveMode.handleLocalSteering(1);
+        }
+      } else if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
       if (e.code === 'Escape') {
+
         if (this.stateMachine.state !== 'MENU' && this.stateMachine.state !== 'GAME_OVER') {
           this.isPaused = !this.isPaused;
           this.hud.showPauseMenu(this.isPaused);
@@ -368,7 +410,39 @@ export class Game {
     }
   }
 
+  private setEntitiesVisibility(visible: boolean): void {
+    this.ball.group.visible = visible;
+    this.playerPaddle.group.visible = visible;
+    this.cpuPaddle.group.visible = visible;
+  }
+
+  private startCurveMatch(isMultiplayer: boolean): void {
+    this.gameModeType = 'CURVE';
+    this.setEntitiesVisibility(false);
+    this.curveMode.group.visible = true;
+    this.cameraCtrl.setMode('CURVE');
+    this.stateMachine.setState('RALLY'); // Active playing state
+
+    const oppName = isMultiplayer ? this.network.remoteUsername : 'BOT (CURVE)';
+    this.hud.setOpponentName(oppName);
+    this.sound.playWhistle();
+    this.curveMode.startMatch(isMultiplayer);
+  }
+
   private handleNetworkMessage(msg: NetworkMessage): void {
+    // If curve network packet, forward directly to CurveGameMode
+    if (
+      msg.type === 'CURVE_INPUT' ||
+      msg.type === 'CURVE_ROUND_START' ||
+      msg.type === 'CURVE_CRASH' ||
+      msg.type === 'CURVE_SCORE_SYNC'
+    ) {
+      if (this.gameModeType === 'CURVE') {
+        this.curveMode.handleNetworkMessage(msg);
+      }
+      return;
+    }
+
     if (msg.type === 'PADDLE_MOVE') {
       this.remotePlayerCtrl.onRemotePaddleMove(msg);
       return;
@@ -452,6 +526,10 @@ export class Game {
   }
 
   private startMatchSequence(): void {
+    this.gameModeType = 'PONG';
+    this.setEntitiesVisibility(true);
+    this.curveMode.group.visible = false;
+    this.cameraCtrl.setMode('PONG');
     this.sound.playWhistle();
     this.stateMachine.prepareService();
   }
@@ -481,7 +559,25 @@ export class Game {
       return;
     }
 
-    // Match point dramatic slow motion (0.85x)
+    if (this.gameModeType === 'CURVE') {
+      // Curve Battle simulation loop
+      if (this.stateMachine.state !== 'MENU') {
+        this.curveMode.update(rawDelta);
+        this.stadium.update(rawDelta);
+        this.vfx.update(rawDelta);
+      }
+
+      this.cameraCtrl.update(
+        rawDelta,
+        new THREE.Vector3(0, 0.76, 0),
+        new THREE.Vector3(0, 0.76, 0)
+      );
+
+      this.renderer.render(this.scene, this.cameraCtrl.camera);
+      return;
+    }
+
+    // Classic Pong simulation loop
     const isMatchPoint = this.stateMachine.score.player >= 10 || this.stateMachine.score.cpu >= 10;
     const targetScale = (isMatchPoint && this.stateMachine.state === 'RALLY') ? 0.85 : 1.0;
     this.timeScale = THREE.MathUtils.lerp(this.timeScale, targetScale, rawDelta * 5);
@@ -517,3 +613,4 @@ export class Game {
     this.renderer.render(this.scene, this.cameraCtrl.camera);
   }
 }
+
