@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Spin Pong 3D - Arcade Table Tennis</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" href="/favicon.png" />
@@ -108,16 +108,39 @@
     <div id="main-menu" class="overlay-screen active">
       <div class="menu-layout">
         <!-- Controls & Keybinds Sidebar -->
-        <aside class="controls-sidebar">
+        <aside class="controls-sidebar" id="controls-sidebar">
           <div class="sidebar-header">
             <span class="sidebar-badge-icon">🎮</span>
             <div class="sidebar-title-box">
               <h3>HOW TO PLAY</h3>
               <p class="sidebar-sub">Controls & Keybindings</p>
             </div>
+            <button id="sidebar-close-btn" class="sidebar-close-btn" title="Close Guide">✕</button>
           </div>
 
           <div class="sidebar-content-scroll">
+            <div class="sidebar-group touch-controls-group">
+              <div class="group-title">
+                <span class="group-icon">📱</span> MOBILE TOUCHSCREEN
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Move Paddle</span>
+                <span class="key-combo"><span class="hint-tag">Slide finger sideways</span></span>
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Topspin Arc</span>
+                <span class="key-combo"><span class="hint-tag">Swipe UP</span></span>
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Backspin Slice</span>
+                <span class="key-combo"><span class="hint-tag">Swipe DOWN</span></span>
+              </div>
+              <div class="keybind-row">
+                <span class="action-name">Serve / Fast Tap</span>
+                <span class="key-combo"><span class="hint-tag">Quick Tap</span></span>
+              </div>
+            </div>
+
             <div class="sidebar-group">
               <div class="group-title">
                 <span class="group-icon">🖱️</span> TOUCHPAD & MOUSE
@@ -271,6 +294,9 @@
             </button>
             <button id="play-friend-btn" class="secondary-btn">
               <span class="btn-icon">👥</span> PLAY A FRIEND
+            </button>
+            <button id="mobile-guide-btn" class="secondary-btn mobile-guide-toggle-btn">
+              <span class="btn-icon">📖</span> HOW TO PLAY
             </button>
           </div>
         </div>

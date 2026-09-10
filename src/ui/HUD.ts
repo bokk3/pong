@@ -1,10 +1,12 @@
 import { Difficulty, MatchScore, PlayerId, ShotInfo, MultiplayerRole } from '../types';
 import { EventBus } from '../core/EventBus';
 import { NetworkManager } from '../network/NetworkManager';
+import { DeviceDetector } from '../utils/DeviceDetector';
 
 export class HUD {
   private eventBus: EventBus;
   private network: NetworkManager;
+  private deviceDetector: DeviceDetector;
 
   // DOM Elements - Scoreboard
   private playerScoreEl: HTMLElement;
@@ -42,6 +44,10 @@ export class HUD {
   private mainMenuEl: HTMLElement;
   private pauseMenuEl: HTMLElement;
   private gameOverEl: HTMLElement;
+  private controlsHintEl: HTMLElement;
+  private controlsSidebarEl: HTMLElement;
+  private mobileGuideBtn: HTMLElement | null = null;
+  private sidebarCloseBtn: HTMLElement | null = null;
   private startBtn: HTMLElement;
   private findMatchBtn: HTMLElement;
   private playFriendBtn: HTMLElement;
@@ -102,6 +108,7 @@ export class HUD {
   constructor() {
     this.eventBus = EventBus.get();
     this.network = NetworkManager.get();
+    this.deviceDetector = DeviceDetector.get();
 
     // Scoreboard
     this.playerScoreEl = document.getElementById('player-score')!;
@@ -117,6 +124,10 @@ export class HUD {
     this.servePromptEl = document.getElementById('serve-prompt')!;
     this.hudPingBadgeEl = document.getElementById('hud-ping-badge')!;
     this.hudPingValEl = document.getElementById('hud-ping-val')!;
+    this.controlsHintEl = document.getElementById('controls-hint')!;
+    this.controlsSidebarEl = document.getElementById('controls-sidebar')!;
+    this.mobileGuideBtn = document.getElementById('mobile-guide-btn');
+    this.sidebarCloseBtn = document.getElementById('sidebar-close-btn');
 
     // Presence
     this.queueCountEl = document.getElementById('queue-count')!;
@@ -188,9 +199,22 @@ export class HUD {
     this.setupGameListeners();
     this.setupNetworkListeners();
     this.checkUrlRoomParameter();
+    this.updateControlsHint();
   }
 
   private setupUIEvents(): void {
+    // Mobile How-to-Play Guide Drawer
+    if (this.mobileGuideBtn) {
+      this.mobileGuideBtn.addEventListener('click', () => {
+        this.controlsSidebarEl.classList.add('open');
+      });
+    }
+
+    if (this.sidebarCloseBtn) {
+      this.sidebarCloseBtn.addEventListener('click', () => {
+        this.controlsSidebarEl.classList.remove('open');
+      });
+    }
     // Difficulty selector buttons
     const diffButtons = document.querySelectorAll<HTMLButtonElement>('.diff-btn');
     diffButtons.forEach(btn => {
@@ -408,6 +432,10 @@ export class HUD {
     this.eventBus.on('match:over', ({ winner, score }) => {
       this.showGameOver(winner, score);
     });
+
+    this.eventBus.on('device:resize', () => {
+      this.updateControlsHint();
+    });
   }
 
   private setupNetworkListeners(): void {
@@ -547,6 +575,25 @@ export class HUD {
     this.displayRoomCodeEl.textContent = '...';
     const code = await this.network.initPeer();
     this.displayRoomCodeEl.textContent = code.toUpperCase();
+  }
+
+  private updateControlsHint(): void {
+    if (!this.controlsHintEl) return;
+    if (this.deviceDetector.info.isTouchDevice) {
+      this.controlsHintEl.innerHTML = `
+        <div class="hint-item"><span class="key">Slide</span> Move</div>
+        <div class="hint-item"><span class="key">Swipe ↑</span> Topspin</div>
+        <div class="hint-item"><span class="key">Swipe ↓</span> Slice</div>
+        <div class="hint-item"><span class="key">Tap</span> Hit / Serve</div>
+      `;
+    } else {
+      this.controlsHintEl.innerHTML = `
+        <div class="hint-item"><span class="key">Mouse Flick</span> or <span class="key">Space</span> Swing</div>
+        <div class="hint-item"><span class="key">↑ Flick</span> / <span class="key">J</span> Topspin</div>
+        <div class="hint-item"><span class="key">↓ Flick</span> / <span class="key">K</span> Slice</div>
+        <div class="hint-item"><span class="key">L</span> Smash</div>
+      `;
+    }
   }
 
   private generateRandomNickname(): string {

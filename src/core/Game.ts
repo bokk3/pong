@@ -431,11 +431,22 @@ export class Game {
   }
 
   private setupWindowEvents(): void {
-    window.addEventListener('resize', () => {
+    const handleResize = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
       this.cameraCtrl.setAspect(width / height);
       this.renderer.setSize(width, height);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(handleResize, 100);
+    });
+
+    this.eventBus.on('device:resize', (info) => {
+      this.cameraCtrl.setAspect(info.aspectRatio);
+      this.renderer.setSize(info.screenWidth, info.screenHeight);
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     });
   }

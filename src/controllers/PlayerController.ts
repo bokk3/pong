@@ -28,8 +28,15 @@ export class PlayerController {
   private mousePrevPos = { x: 0, y: 0 };
   private mouseVelocity = { x: 0, y: 0 };
   private lastMouseMoveTime: number = 0;
-  private isPointerDown: boolean = false;
+  public isPointerDown: boolean = false;
   private pointerDownPos = { x: 0, y: 0 };
+
+  // Mobile Touch tracking
+  private activeTouchId: number | null = null;
+  private touchPrevPos = { x: 0, y: 0 };
+  private touchVelocity = { x: 0, y: 0 };
+  private lastTouchMoveTime: number = 0;
+  private touchStartTime: number = 0;
 
   // Timing & Assisted Position
   private manualOffset = new THREE.Vector2(0, 0);
@@ -61,21 +68,81 @@ export class PlayerController {
     window.addEventListener('mousedown', (e) => this.onMouseDown(e));
     window.addEventListener('mouseup', (e) => this.onMouseUp(e));
 
-    // Touch support
+    // Mobile Touchscreen support
     window.addEventListener('touchstart', (e) => {
       if (e.touches.length > 0) {
-        this.pointerDownPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        const touch = e.touches[0];
+        this.activeTouchId = touch.identifier;
+        this.pointerDownPos = { x: touch.clientX, y: touch.clientY };
+        this.touchPrevPos = { x: touch.clientX, y: touch.clientY };
         this.isPointerDown = true;
+        this.touchStartTime = performance.now();
+        this.lastTouchMoveTime = this.touchStartTime;
+
+        // Immediately update lateral paddle position on touch
+        const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
+        this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.activeTouchId) {
+          const now = performance.now();
+          const dt = Math.max((now - this.lastTouchMoveTime) / 1000, 0.004);
+          this.lastTouchMoveTime = now;
+
+          const dx = touch.clientX - this.touchPrevPos.x;
+          const dy = touch.clientY - this.touchPrevPos.y;
+          this.touchPrevPos = { x: touch.clientX, y: touch.clientY };
+
+          // Filter touch velocity
+          this.touchVelocity.x = THREE.MathUtils.lerp(this.touchVelocity.x, dx / dt, 0.5);
+          this.touchVelocity.y = THREE.MathUtils.lerp(this.touchVelocity.y, dy / dt, 0.5);
+
+          // Update lateral position across baseline smoothly
+          const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
+          this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+
+          // Rapid upward / downward flick detection while dragging
+          const flickSpeed = Math.hypot(this.touchVelocity.x, this.touchVelocity.y);
+          const threshold = 420 / Math.max(this.sensitivity, 0.5);
+          if (flickSpeed > threshold && (now - this.lastFlickTime > this.FLICK_COOLDOWN_MS)) {
+            this.lastFlickTime = now;
+            this.handleFlickGesture(this.touchVelocity.y);
+          }
+          break;
+        }
       }
     }, { passive: true });
 
     window.addEventListener('touchend', (e) => {
-      if (this.isPointerDown && e.changedTouches.length > 0) {
-        const dx = e.changedTouches[0].clientX - this.pointerDownPos.x;
-        const dy = e.changedTouches[0].clientY - this.pointerDownPos.y;
-        this.executeSwipe(dx, dy);
-        this.isPointerDown = false;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.activeTouchId) {
+          const dx = touch.clientX - this.pointerDownPos.x;
+          const dy = touch.clientY - this.pointerDownPos.y;
+          const elapsed = performance.now() - this.touchStartTime;
+          const dist = Math.hypot(dx, dy);
+
+          // If short tap (< 250ms and small movement), execute quick tap strike/serve
+          if (elapsed < 250 && dist < 25) {
+            this.attemptStrike('TOPSPIN', 1.15);
+          } else {
+            this.executeSwipe(dx, dy);
+          }
+
+          this.isPointerDown = false;
+          this.activeTouchId = null;
+          break;
+        }
       }
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      this.isPointerDown = false;
+      this.activeTouchId = null;
     }, { passive: true });
 
     // Keyboard support

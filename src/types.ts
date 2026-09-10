@@ -66,6 +66,17 @@ export interface TableBounds {
   tableTopY: number;
 }
 
+export interface DeviceInfo {
+  isMobile: boolean;
+  isTablet: boolean;
+  isTouchDevice: boolean;
+  isPortrait: boolean;
+  aspectRatio: number;
+  orientation: 'portrait' | 'landscape';
+  screenWidth: number;
+  screenHeight: number;
+}
+
 export type GameEvents = {
   'state:changed': { from: GameState; to: GameState };
   'score:updated': MatchScore;
@@ -79,4 +90,6 @@ export type GameEvents = {
   'network:status': { status: 'disconnected' | 'connecting' | 'connected'; message?: string; role?: MultiplayerRole; remoteUsername?: string };
   'presence:updated': PresenceStats;
   'multiplayer:rematch': { from: 'local' | 'remote'; status: 'requested' | 'accepted' | 'declined' };
+  'device:orientation': { orientation: 'portrait' | 'landscape'; isPortrait: boolean };
+  'device:resize': DeviceInfo;
 };

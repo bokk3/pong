@@ -34,6 +34,7 @@ html, body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  touch-action: none;
 }
 
 #webgl-canvas {
@@ -44,6 +45,7 @@ html, body {
   height: 100%;
   display: block;
   z-index: 1;
+  touch-action: none;
 }
 
 /* ================= HUD ================= */
@@ -58,7 +60,8 @@ html, body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 24px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  touch-action: none;
 }
 
 /* Scoreboard */
@@ -1572,31 +1575,288 @@ html, body {
   50% { box-shadow: 0 6px 25px rgba(255, 204, 0, 0.85); transform: translateY(-1px); }
 }
 
-/* Responsive queries */
-@media (max-width: 768px) {
+/* ================= MOBILE & PORTRAIT RESPONSIVE SYSTEM ================= */
+
+/* Mobile Guide Toggle Button */
+.mobile-guide-toggle-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #cbd5e1;
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 12px;
+}
+
+.sidebar-close-btn {
+  display: none;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+
+/* Touch specific hints & adaptations */
+.is-touch .touch-controls-group {
+  display: block;
+}
+
+.is-desktop .touch-controls-group {
+  display: none;
+}
+
+.is-touch .arcade-toggle-btn.large {
+  display: none;
+}
+
+/* Portrait Mode & Mobile Layout */
+.is-portrait .mobile-guide-toggle-btn {
+  display: flex;
+}
+
+@media (max-width: 960px) {
+  .mobile-guide-toggle-btn {
+    display: flex;
+  }
+
+  .menu-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 520px;
+    padding: 12px;
+  }
+
+  .controls-sidebar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 100;
+    background: rgba(8, 14, 32, 0.97);
+    backdrop-filter: blur(24px);
+    border-radius: 0;
+    border: none;
+    padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    box-shadow: none;
+  }
+
+  .controls-sidebar.open {
+    display: flex;
+    flex-direction: column;
+    animation: fadeInModal 0.25s ease-out;
+  }
+
+  .sidebar-close-btn {
+    display: flex;
+  }
+
+  .menu-card {
+    width: 100%;
+    max-width: 480px;
+    padding: 24px 20px;
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+}
+
+/* Narrow Portrait & Mobile Devices (< 640px) */
+@media (max-width: 640px), (orientation: portrait) and (max-width: 768px) {
   #scoreboard {
+    gap: 6px;
+    width: 100%;
+    max-width: 100%;
+    justify-content: space-between;
+  }
+
+  .score-card {
+    min-width: 108px;
+    padding: 6px 10px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+
+  .player-name {
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .player-score {
+    font-size: 24px;
+  }
+
+  .server-indicator {
+    font-size: 8px;
+    padding: 1px 5px;
+    top: -8px;
+    letter-spacing: 0.5px;
+  }
+
+  .score-divider {
+    min-width: 74px;
+    padding: 2px 6px;
+  }
+
+  .match-info {
+    font-size: 9px;
+    letter-spacing: 0.5px;
+  }
+
+  .rally-counter {
+    font-size: 9px;
+  }
+
+  .hud-ping-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+
+  /* Main Menu compacting */
+  .logo-image {
+    width: 72px;
+    height: 72px;
+  }
+
+  .logo-title {
+    font-size: 26px;
+  }
+
+  .logo-badge {
+    font-size: 9px;
+  }
+
+  .tagline {
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+
+  .presence-bar {
+    padding: 4px 12px;
+    gap: 8px;
+    margin: 6px auto 12px auto;
+  }
+
+  .presence-pill {
+    font-size: 11px;
+    gap: 5px;
+  }
+
+  .presence-label {
+    font-size: 10px;
+  }
+
+  .difficulty-buttons {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .diff-btn {
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .diff-desc {
+    display: none;
+  }
+
+  .menu-actions {
     gap: 8px;
   }
-  .score-card {
-    min-width: 140px;
-    padding: 8px 14px;
-  }
-  .player-name {
+
+  .primary-btn, .secondary-btn {
+    padding: 12px 16px;
     font-size: 14px;
   }
-  .player-score {
+
+  /* HUD controls hint */
+  #controls-hint {
+    font-size: 10px;
+    padding: 6px 14px;
+    gap: 8px;
+    border-radius: 20px;
+  }
+
+  /* Matchmaking modal scale */
+  .matchmaking-card {
+    padding: 24px 16px;
+    width: 94%;
+  }
+
+  .modal-title {
+    font-size: 20px;
+  }
+
+  .radar-container {
+    width: 130px;
+    height: 130px;
+    margin: 12px auto;
+  }
+
+  .circle-1 { width: 42px; height: 42px; }
+  .circle-2 { width: 80px; height: 80px; }
+  .circle-3 { width: 118px; height: 118px; }
+
+  .radar-sweep {
+    width: 65px;
+    height: 65px;
+  }
+
+  .radar-center-blip {
+    font-size: 18px;
+  }
+
+  .room-code-display {
+    font-size: 22px;
+    letter-spacing: 4px;
+    padding: 6px 12px;
+  }
+
+  /* Game Over stats grid on mobile */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stat-box {
+    padding: 10px 6px;
+  }
+
+  .stat-num {
+    font-size: 20px;
+  }
+
+  .result-title {
     font-size: 32px;
   }
-  .score-divider {
-    min-width: 90px;
-    padding: 4px 8px;
+
+  .result-subtitle {
+    font-size: 13px;
   }
-  .difficulty-buttons, .control-guide, .stats-grid {
-    grid-template-columns: 1fr;
+
+  /* Corner Settings in mobile HUD */
+  #hud-settings-container {
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
   }
-  #controls-hint {
-    font-size: 11px;
-    flex-wrap: wrap;
-    justify-content: center;
+
+  .hud-settings-dropdown {
+    right: 0;
+    width: 260px;
   }
 }
