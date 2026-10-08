@@ -274,16 +274,22 @@
 
           <!-- Live Edge Presence Counter -->
           <div class="presence-bar" id="presence-bar">
-            <div class="presence-pill queue-pill" title="Players currently in matchmaking">
-              <span class="pulse-dot pulse-green"></span>
-              <span class="presence-count" id="queue-count">0</span>
-              <span class="presence-label">Looking for Match</span>
+            <div class="presence-pill online-pill" title="Total players connected online">
+              <span class="pulse-dot pulse-cyan"></span>
+              <span class="presence-count" id="online-count">1</span>
+              <span class="presence-label">Online</span>
             </div>
             <div class="presence-divider">•</div>
-            <div class="presence-pill playing-pill" title="Players currently in a live match">
+            <div class="presence-pill queue-pill" title="Players looking for a match">
+              <span class="pulse-dot pulse-green"></span>
+              <span class="presence-count" id="queue-count">0</span>
+              <span class="presence-label">Looking</span>
+            </div>
+            <div class="presence-divider">•</div>
+            <div class="presence-pill playing-pill" title="Live games in-progress">
               <span class="pulse-dot pulse-blue"></span>
               <span class="presence-count" id="playing-count">0</span>
-              <span class="presence-label">In Match</span>
+              <span class="presence-label">In Match (<span id="pong-games-count">0</span> 🏓 / <span id="curve-games-count">0</span> 🐍)</span>
             </div>
           </div>
           
@@ -302,7 +308,7 @@
                 <span class="gamemode-icon">🐍</span>
                 <span class="gamemode-text">
                   <span class="gamemode-title">CURVE BATTLE</span>
-                  <span class="gamemode-desc">Achtung die Kurve 3D</span>
+                  <span class="gamemode-desc">Achtung die Kurve 2D</span>
                 </span>
               </button>
             </div>
@@ -326,7 +332,6 @@
             </div>
           </div>
 
-
           <div class="menu-settings-box">
             <div class="menu-setting-row">
               <label>Controls Sensitivity: <span id="menu-sens-val">1.2x</span></label>
@@ -342,11 +347,14 @@
             <button id="start-btn" class="secondary-btn bot-match-btn">
               <span class="btn-icon">🤖</span> PLAY VS BOT
             </button>
-            <button id="find-match-btn" class="primary-btn multiplayer-glow-btn">
+            <button id="lobby-browser-btn" class="primary-btn lobby-pulse-btn">
+              <span class="btn-icon">🌐</span> MULTIPLAYER LOBBY
+            </button>
+            <button id="find-match-btn" class="secondary-btn multiplayer-glow-btn">
               <span class="btn-icon">⚡</span> QUICK MATCH (P2P)
             </button>
             <button id="play-friend-btn" class="secondary-btn">
-              <span class="btn-icon">👥</span> PLAY A FRIEND
+              <span class="btn-icon">👥</span> PRIVATE CODE
             </button>
             <button id="mobile-guide-btn" class="secondary-btn mobile-guide-toggle-btn">
               <span class="btn-icon">📖</span> HOW TO PLAY
@@ -355,6 +363,120 @@
         </div>
       </div>
     </div>
+
+    <!-- Arcade Multiplayer Lobby Modal -->
+    <div id="lobby-modal" class="overlay-screen">
+      <div class="modal-card lobby-card">
+        <button id="close-lobby-btn" class="modal-close-btn" title="Close Lobby">✕</button>
+
+        <div class="lobby-header">
+          <div class="lobby-header-main">
+            <div class="modal-title">🌐 ARCADE LOBBY BROWSER</div>
+            <p class="modal-subtitle">Browse public game rooms or host your own arena • Zero server lag</p>
+          </div>
+          <div class="lobby-stats-strip">
+            <span class="lobby-stat-item"><strong id="lobby-online-val">0</strong> Online</span>
+            <span class="lobby-stat-sep">•</span>
+            <span class="lobby-stat-item"><strong id="lobby-looking-val">0</strong> Looking</span>
+            <span class="lobby-stat-sep">•</span>
+            <span class="lobby-stat-item"><strong id="lobby-playing-val">0</strong> Playing</span>
+            <span class="lobby-stat-sep">•</span>
+            <span class="lobby-stat-item"><span id="lobby-pong-val">0</span> 🏓 Pong</span>
+            <span class="lobby-stat-sep">•</span>
+            <span class="lobby-stat-item"><span id="lobby-curve-val">0</span> 🐍 Curve</span>
+          </div>
+        </div>
+
+        <!-- Lobby Controls Row: Filter buttons & Create Room button -->
+        <div class="lobby-toolbar">
+          <div class="lobby-filters">
+            <button class="lobby-filter-btn active" data-lobby-filter="ALL">ALL ROOMS</button>
+            <button class="lobby-filter-btn" data-lobby-filter="PONG">🏓 CLASSIC PONG</button>
+            <button class="lobby-filter-btn" data-lobby-filter="CURVE">🐍 CURVE BATTLE</button>
+          </div>
+          <div class="lobby-toolbar-actions">
+            <button id="lobby-refresh-btn" class="secondary-btn lobby-refresh-btn" title="Refresh room list">🔄 Refresh</button>
+            <button id="lobby-open-create-btn" class="primary-btn lobby-create-action-btn">➕ CREATE ROOM</button>
+          </div>
+        </div>
+
+        <!-- Create Room Panel (Collapsible / Toggleable) -->
+        <div id="lobby-create-panel" class="lobby-create-panel" style="display: none;">
+          <div class="create-panel-header">
+            <h4>HOST NEW ARENA</h4>
+            <button id="lobby-cancel-create-btn" class="panel-close-btn">✕</button>
+          </div>
+          <div class="create-panel-form">
+            <div class="create-field">
+              <label for="create-room-name">ROOM NAME</label>
+              <input type="text" id="create-room-name" maxlength="24" placeholder="e.g. Speed Rally Master" />
+            </div>
+            <div class="create-field">
+              <label>GAME MODE</label>
+              <div class="create-mode-radios">
+                <button type="button" class="mode-select-pill active" id="create-mode-pong" data-create-mode="PONG">🏓 Classic Pong</button>
+                <button type="button" class="mode-select-pill" id="create-mode-curve" data-create-mode="CURVE">🐍 Curve Battle</button>
+              </div>
+            </div>
+            <div class="create-field" id="create-score-field">
+              <label for="create-room-score">TARGET POINTS</label>
+              <select id="create-room-score">
+                <option value="5">First to 5 (Quick)</option>
+                <option value="11" selected>First to 11 (Standard)</option>
+                <option value="21">First to 21 (Endurance)</option>
+              </select>
+            </div>
+            <div class="create-form-actions">
+              <button id="lobby-submit-create-btn" class="primary-btn">HOST & WAIT FOR OPPONENT</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Waiting Host Room View (Shown when hosting a room) -->
+        <div id="lobby-hosting-view" class="lobby-hosting-view" style="display: none;">
+          <div class="hosting-card">
+            <div class="radar-container mini-radar">
+              <div class="radar-circle circle-1"></div>
+              <div class="radar-circle circle-2"></div>
+              <div class="radar-sweep"></div>
+              <div class="radar-center-blip">📡</div>
+            </div>
+            <div class="hosting-info">
+              <h3 id="hosting-room-title">HOSTING ROOM...</h3>
+              <p>Room Code: <strong id="hosting-room-code" class="highlight-code">------</strong></p>
+              <p class="hosting-status-sub">Listed in public lobby. Waiting for a challenger to join...</p>
+            </div>
+            <button id="lobby-cancel-host-btn" class="secondary-btn">CANCEL HOSTING</button>
+          </div>
+        </div>
+
+        <!-- Rooms List Table Container -->
+        <div class="lobby-table-wrapper" id="lobby-table-wrapper">
+          <table class="lobby-table">
+            <thead>
+              <tr>
+                <th>ROOM NAME</th>
+                <th>GAME MODE</th>
+                <th>HOST</th>
+                <th>SCORE GOAL</th>
+                <th>STATUS</th>
+                <th style="text-align: right;">ACTION</th>
+              </tr>
+            </thead>
+            <tbody id="lobby-rooms-body">
+              <tr class="lobby-empty-row">
+                <td colspan="6">Loading public game rooms...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="modal-footer lobby-footer">
+          <button id="exit-lobby-btn" class="secondary-btn">BACK TO MENU</button>
+        </div>
+      </div>
+    </div>
+
 
     <!-- Matchmaking & Peer-to-Peer Modal -->
     <div id="matchmaking-modal" class="overlay-screen">

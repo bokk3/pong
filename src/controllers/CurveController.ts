@@ -123,14 +123,14 @@ export class CurveController {
     this.steering = dir;
   }
 
-  public update(dt: number, opponentTrail?: CurveTrail): boolean {
+  public update(dt: number, opponentTrail?: CurveTrail, opponentState?: { x: number; z: number; angle: number; isAlive: boolean }): boolean {
     if (!this.isAlive) return false;
 
     this.totalElapsed += dt;
 
-    // 1. If Bot, compute autonomous steering
+    // 1. If Bot, compute autonomous steering with opponent tactical awareness
     if (this.isBot) {
-      this.computeBotSteering(opponentTrail);
+      this.computeBotSteering(opponentTrail, opponentState);
     }
 
     // 2. Angular steering
@@ -224,94 +224,174 @@ export class CurveController {
   }
 
   /**
-   * Smart curve Bot AI:
-   * Casts fan of predictive rays ahead to evaluate free travel distance,
-   * detects dead ends, and adds gentle inward wall repulsion so bot doesn't slam into borders.
+   * Advanced Curve Bot AI:
+   * 1. Multi-step fan raycasting with pocket volume sampling (detects trapped cavities).
+   * 2. Edge repulsion with corner anti-pinch (never commits into narrow corner traps).
+   * 3. Aggressive tactical cutting-off: steers across opponent's path to starve their space.
+   * 4. Wall-pinning: if opponent is near the edge, cuts inward to box them against the wall.
    */
-  private computeBotSteering(opponentTrail?: CurveTrail): void {
-    // Lookahead distance scaled by difficulty
-    const lookAheadDistance = this.difficulty === 'novice' ? 0.75 : this.difficulty === 'pro' ? 0.95 : 1.25;
+  private computeBotSteering(opponentTrail?: CurveTrail, opponentState?: { x: number; z: number; angle: number; isAlive: boolean }): void {
+    const isNovice = this.difficulty === 'novice';
+    const isChampion = this.difficulty === 'master';
 
-    // Test a broader fan of prospective steering directions:
-    // Straight (0), gentle turns (±0.35 rad), sharp turns (±0.7 rad), hard evasions (±1.1 rad)
-    const anglesToTest: Array<{ dir: -1 | 0 | 1; offset: number; weight: number }> = [
-      { dir: 0, offset: 0, weight: 1.1 },
-      { dir: -1, offset: -0.35, weight: 1.0 },
-      { dir: 1, offset: 0.35, weight: 1.0 },
-      { dir: -1, offset: -0.7, weight: 0.95 },
-      { dir: 1, offset: 0.7, weight: 0.95 },
-      { dir: -1, offset: -1.15, weight: 0.85 },
-      { dir: 1, offset: 1.15, weight: 0.85 }
+    // Lookahead reach
+    const maxLookahead = isNovice ? 0.9 : isChampion ? 1.4 : 1.15;
+
+    // Prospective candidate steering commands
+    const candidates: Array<{ dir: -1 | 0 | 1; turnAngle: number; straightBias: number }> = [
+      { dir: 0, turnAngle: 0, straightBias: 0.15 },
+      { dir: -1, turnAngle: -0.4, straightBias: 0 },
+      { dir: 1, turnAngle: 0.4, straightBias: 0 },
+      { dir: -1, turnAngle: -0.85, straightBias: -0.05 },
+      { dir: 1, turnAngle: 0.85, straightBias: -0.05 },
+      { dir: -1, turnAngle: -1.35, straightBias: -0.1 },
+      { dir: 1, turnAngle: 1.35, straightBias: -0.1 }
     ];
 
     let bestDir: -1 | 0 | 1 = 0;
-    let maxScore = -999;
+    let highestScore = -9999;
 
-    for (const test of anglesToTest) {
-      const testAngle = this.angle + test.offset;
-      let clearDist = 0;
-      const steps = 10;
-      let hit = false;
+    // Evaluate each prospective turn
+    for (const cand of candidates) {
+      const probeAngle = this.angle + cand.turnAngle;
+      let clearDistance = 0;
+      let hitObstacle = false;
+      const steps = 12;
 
       for (let s = 1; s <= steps; s++) {
-        const d = (s / steps) * lookAheadDistance;
-        const tx = this.x + Math.cos(testAngle) * d;
-        const tz = this.z + Math.sin(testAngle) * d;
+        const dist = (s / steps) * maxLookahead;
+        const px = this.x + Math.cos(probeAngle) * dist;
+        const pz = this.z + Math.sin(probeAngle) * dist;
 
-        // 1. Check square boundaries (leave generous safety buffer of 0.08)
-        if (tx <= this.minX + 0.08 || tx >= this.maxX - 0.08 || tz <= this.minZ + 0.08 || tz >= this.maxZ - 0.08) {
-          hit = true;
+        // Wall safety check (with generous margin)
+        const wallMargin = isNovice ? 0.16 : 0.12;
+        if (px <= this.minX + wallMargin || px >= this.maxX - wallMargin || pz <= this.minZ + wallMargin || pz >= this.maxZ - wallMargin) {
+          hitObstacle = true;
           break;
         }
 
-        // 2. Check own trail
-        const p = { x: tx, y: tz };
-        const graceTime = 0.25;
+        const point = { x: px, y: pz };
+        const safeRadius = this.config.headRadius * 1.7;
+
+        // Own trail obstacle check
         for (let i = 0; i < this.trail.segments.length; i++) {
           const seg = this.trail.segments[i];
-          if (this.totalElapsed - seg.time < graceTime) continue;
-          if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.8) {
-            hit = true;
+          if (this.totalElapsed - seg.time < 0.25) continue;
+          if (distToSegment(point, seg.p1, seg.p2) < safeRadius) {
+            hitObstacle = true;
             break;
           }
         }
-        if (hit) break;
+        if (hitObstacle) break;
 
-        // 3. Check opponent trail
+        // Opponent trail obstacle check
         if (opponentTrail) {
           for (let i = 0; i < opponentTrail.segments.length; i++) {
             const seg = opponentTrail.segments[i];
-            if (distToSegment(p, seg.p1, seg.p2) < this.config.headRadius * 1.8) {
-              hit = true;
+            if (distToSegment(point, seg.p1, seg.p2) < safeRadius) {
+              hitObstacle = true;
               break;
             }
           }
-          if (hit) break;
+          if (hitObstacle) break;
         }
 
-        clearDist = d;
+        clearDistance = dist;
       }
 
-      if (!hit) {
-        clearDist = lookAheadDistance;
+      if (!hitObstacle) {
+        clearDistance = maxLookahead;
       }
 
-      // Bonus score for staying away from borders (inward center bias)
-      const futureX = this.x + Math.cos(testAngle) * clearDist;
-      const futureZ = this.z + Math.sin(testAngle) * clearDist;
-      const distFromCenter = Math.hypot(futureX, futureZ);
-      const centerBonus = Math.max(0, 1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 0.15;
+      // Base survival score: length of uninterrupted forward flight
+      let score = clearDistance * 4.0 + cand.straightBias;
 
-      const score = (clearDist * test.weight) + centerBonus;
+      // Heavy penalty for immediate dead ends (< 0.35m ahead)
+      if (clearDistance < 0.35) {
+        score -= 50;
+      }
 
-      if (score > maxScore) {
-        maxScore = score;
-        bestDir = test.dir;
+      // End of probe position
+      const probeEndX = this.x + Math.cos(probeAngle) * clearDistance;
+      const probeEndZ = this.z + Math.sin(probeAngle) * clearDistance;
+
+      // Pocket Area Check: sample left and right wings from probe endpoint
+      // This detects if the bot is driving straight into a narrow canyon/pocket
+      const leftWingX = probeEndX + Math.cos(probeAngle - Math.PI / 2) * 0.25;
+      const leftWingZ = probeEndZ + Math.sin(probeAngle - Math.PI / 2) * 0.25;
+      const rightWingX = probeEndX + Math.cos(probeAngle + Math.PI / 2) * 0.25;
+      const rightWingZ = probeEndZ + Math.sin(probeAngle + Math.PI / 2) * 0.25;
+
+      const isLeftClogged = this.isLocationBlocked(leftWingX, leftWingZ, opponentTrail);
+      const isRightClogged = this.isLocationBlocked(rightWingX, rightWingZ, opponentTrail);
+
+      if (isLeftClogged && isRightClogged) {
+        score -= 25; // Canyon trap penalty!
+      }
+
+      // Border avoidance bonus: prefer heading towards the open center
+      const distFromCenter = Math.hypot(probeEndX, probeEndZ);
+      const centerBias = (1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 0.8;
+      score += centerBias;
+
+      // --- Offensive Tactics vs Opponent ---
+      if (opponentState && opponentState.isAlive && !isNovice) {
+        const distToOpp = Math.hypot(opponentState.x - this.x, opponentState.z - this.z);
+
+        // If opponent is within medium engagement distance (~2.2m)
+        if (distToOpp < 2.2) {
+          // Predict where opponent will be in 0.8s
+          const oppPredX = opponentState.x + Math.cos(opponentState.angle) * 1.1;
+          const oppPredZ = opponentState.z + Math.sin(opponentState.angle) * 1.1;
+
+          // Distance from this candidate probe end to opponent's future trajectory
+          const distToOppFuture = Math.hypot(oppPredX - probeEndX, oppPredZ - probeEndZ);
+
+          // 1. Cut-off tactic: steer across their path ahead of them
+          if (distToOppFuture < 0.7 && clearDistance > 0.6) {
+            score += isChampion ? 3.5 : 2.0;
+          }
+
+          // 2. Wall-pinning tactic: if opponent is close to boundary, cut off their escape into center
+          const oppDistFromCenter = Math.hypot(opponentState.x, opponentState.z);
+          if (oppDistFromCenter > CURVE_ARENA_HALF * 0.65) {
+            // Opponent is near wall! Check if our trajectory is between opponent and center
+            const botDistToCenter = Math.hypot(probeEndX, probeEndZ);
+            if (botDistToCenter < oppDistFromCenter && distToOpp < 1.4) {
+              score += isChampion ? 4.0 : 2.2; // Box them against the border!
+            }
+          }
+        }
+      }
+
+      if (score > highestScore) {
+        highestScore = score;
+        bestDir = cand.dir;
       }
     }
 
     this.steering = bestDir;
   }
+
+  private isLocationBlocked(x: number, z: number, opponentTrail?: CurveTrail): boolean {
+    if (x <= this.minX + 0.05 || x >= this.maxX - 0.05 || z <= this.minZ + 0.05 || z >= this.maxZ - 0.05) {
+      return true;
+    }
+    const p = { x, y: z };
+    const r = this.config.headRadius * 1.5;
+
+    for (let i = 0; i < this.trail.segments.length; i++) {
+      if (this.totalElapsed - this.trail.segments[i].time < 0.25) continue;
+      if (distToSegment(p, this.trail.segments[i].p1, this.trail.segments[i].p2) < r) return true;
+    }
+    if (opponentTrail) {
+      for (let i = 0; i < opponentTrail.segments.length; i++) {
+        if (distToSegment(p, opponentTrail.segments[i].p1, opponentTrail.segments[i].p2) < r) return true;
+      }
+    }
+    return false;
+  }
+
 
 
   public dispose(): void {

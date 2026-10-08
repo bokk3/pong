@@ -16,6 +16,25 @@ export type GameMode = 'BOT' | 'MULTIPLAYER';
 
 export type MultiplayerRole = 'HOST' | 'CLIENT';
 
+export interface LobbyRoom {
+  roomId: string;
+  roomName: string;
+  hostName: string;
+  gameMode: GameModeType;
+  status: 'waiting' | 'playing';
+  targetScore: number;
+  playerCount: number;
+  createdAt: number;
+}
+
+export interface LobbyStats {
+  onlineCount: number;
+  lookingCount: number;
+  playingCount: number;
+  pongGamesCount: number;
+  curveGamesCount: number;
+}
+
 export interface NetworkStats {
   pingMs: number;
   connectionState: 'disconnected' | 'connecting' | 'connected';
@@ -26,7 +45,12 @@ export interface NetworkStats {
 export interface PresenceStats {
   lookingCount: number;
   playingCount: number;
+  onlineCount?: number;
+  pongGamesCount?: number;
+  curveGamesCount?: number;
+  rooms?: LobbyRoom[];
 }
+
 
 export type ShotRating = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'SMASH' | 'MISS' | 'ACE';
 

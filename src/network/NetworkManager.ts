@@ -367,12 +367,15 @@ export class NetworkManager {
     return null;
   }
 
+  public activeGameMode: 'PONG' | 'CURVE' = 'PONG';
+  public hostedRoomId: string | null = null;
+
   // --- Presence & Queue Heartbeats ---
   private startPresenceReporting(): void {
     this.reportPresence('menu');
     this.presenceInterval = window.setInterval(() => {
       this.reportPresence(this.isConnected ? 'playing' : (this.isSearching ? 'searching' : 'menu'));
-    }, 8000);
+    }, 6000);
   }
 
   public stopPresenceReporting(): void {
@@ -382,9 +385,20 @@ export class NetworkManager {
     }
   }
 
-  public async reportPresence(status: 'menu' | 'searching' | 'playing' | 'leave'): Promise<{ lookingCount: number; playingCount: number; candidates: CandidatePeer[] } | null> {
+  public async reportPresence(
+    status: 'menu' | 'searching' | 'playing' | 'leave',
+    action?: 'presence' | 'create_room' | 'update_room' | 'close_room',
+    roomData?: { roomName?: string; gameMode?: 'PONG' | 'CURVE'; targetScore?: number; roomId?: string }
+  ): Promise<{
+    lookingCount: number;
+    playingCount: number;
+    onlineCount?: number;
+    pongGamesCount?: number;
+    curveGamesCount?: number;
+    candidates: CandidatePeer[];
+    rooms?: any[];
+  } | null> {
     try {
-      // Use actual peerId if peer is initialized
       const peerId = this.peer?.id || `${PEER_PREFIX}anon_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch('/api/presence', {
         method: 'POST',
@@ -392,7 +406,14 @@ export class NetworkManager {
         body: JSON.stringify({
           peerId,
           username: this.localUsername,
-          status
+          status,
+          gameMode: this.activeGameMode,
+          action: action || (this.hostedRoomId ? 'update_room' : 'presence'),
+          roomData: roomData || (this.hostedRoomId ? {
+            roomId: this.hostedRoomId,
+            gameMode: this.activeGameMode,
+            status: this.isConnected ? 'playing' : 'waiting'
+          } : undefined)
         })
       });
 
@@ -400,12 +421,15 @@ export class NetworkManager {
         const data = await res.json();
         this.eventBus.emit('presence:updated', {
           lookingCount: data.lookingCount || 0,
-          playingCount: data.playingCount || 0
+          playingCount: data.playingCount || 0,
+          onlineCount: data.onlineCount || 0,
+          pongGamesCount: data.pongGamesCount || 0,
+          curveGamesCount: data.curveGamesCount || 0,
+          rooms: data.rooms || []
         });
         return data;
       }
     } catch {
-      // Fallback
       this.eventBus.emit('presence:updated', {
         lookingCount: status === 'searching' ? 1 : 0,
         playingCount: status === 'playing' ? 1 : 0
@@ -413,4 +437,44 @@ export class NetworkManager {
     }
     return null;
   }
+
+  public async createLobbyRoom(gameMode: 'PONG' | 'CURVE', customRoomName?: string, targetScore?: number): Promise<string> {
+    const code = await this.initPeer();
+    this.activeGameMode = gameMode;
+    this.hostedRoomId = this.peer?.id || code;
+    await this.reportPresence('searching', 'create_room', {
+      roomId: this.hostedRoomId,
+      roomName: customRoomName || `${this.localUsername}'s ${gameMode === 'CURVE' ? 'Curve' : 'Pong'} Arena`,
+      gameMode,
+      targetScore: targetScore || (gameMode === 'CURVE' ? 5 : 11)
+    });
+    return code;
+  }
+
+  public async closeLobbyRoom(): Promise<void> {
+    if (this.hostedRoomId) {
+      await this.reportPresence('menu', 'close_room', { roomId: this.hostedRoomId });
+      this.hostedRoomId = null;
+    }
+  }
+
+  public async fetchLobbyRooms(): Promise<{ lookingCount: number; playingCount: number; onlineCount?: number; pongGamesCount?: number; curveGamesCount?: number; rooms: any[] }> {
+    try {
+      const res = await fetch('/api/presence', { method: 'GET' });
+      if (res.ok) {
+        const data = await res.json();
+        this.eventBus.emit('presence:updated', {
+          lookingCount: data.lookingCount || 0,
+          playingCount: data.playingCount || 0,
+          onlineCount: data.onlineCount || 0,
+          pongGamesCount: data.pongGamesCount || 0,
+          curveGamesCount: data.curveGamesCount || 0,
+          rooms: data.rooms || []
+        });
+        return data;
+      }
+    } catch {}
+    return { lookingCount: 0, playingCount: 0, rooms: [] };
+  }
 }
+

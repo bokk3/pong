@@ -222,9 +222,12 @@ export class CurveGameMode {
     }
 
     if (this.roundState === 'PLAYING') {
-      // 1. Update curves
-      const p1Crashed = this.p1.update(dt, this.p2.trail);
-      const p2Crashed = this.p2.update(dt, this.p1.trail);
+      // 1. Update curves with mutual awareness of opponent position and heading
+      const p2State = { x: this.p2.x, z: this.p2.z, angle: this.p2.angle, isAlive: this.p2.isAlive };
+      const p1State = { x: this.p1.x, z: this.p1.z, angle: this.p1.angle, isAlive: this.p1.isAlive };
+
+      const p1Crashed = this.p1.update(dt, this.p2.trail, p2State);
+      const p2Crashed = this.p2.update(dt, this.p1.trail, p1State);
 
       if (p1Crashed) {
         this.handleCrash('PLAYER', this.p1.x, this.p1.z);
@@ -232,6 +235,7 @@ export class CurveGameMode {
       if (p2Crashed) {
         this.handleCrash('CPU', this.p2.x, this.p2.z);
       }
+
 
       // 2. Broadcast local player position over network
       if (this.isMultiplayer && this.network.isConnected) {

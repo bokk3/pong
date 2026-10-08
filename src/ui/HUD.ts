@@ -1,4 +1,4 @@
-import { Difficulty, MatchScore, PlayerId, ShotInfo, MultiplayerRole } from '../types';
+import { Difficulty, MatchScore, PlayerId, ShotInfo, MultiplayerRole, LobbyRoom, GameModeType } from '../types';
 import { EventBus } from '../core/EventBus';
 import { NetworkManager } from '../network/NetworkManager';
 import { DeviceDetector } from '../utils/DeviceDetector';
@@ -26,6 +26,9 @@ export class HUD {
   // Presence Counter Elements
   private queueCountEl: HTMLElement;
   private playingCountEl: HTMLElement;
+  private onlineCountEl: HTMLElement | null = null;
+  private pongGamesCountEl: HTMLElement | null = null;
+  private curveGamesCountEl: HTMLElement | null = null;
 
   // Settings & Webcam DOM Elements
   private sensitivitySliderEl: HTMLInputElement;
@@ -51,11 +54,39 @@ export class HUD {
   private startBtn: HTMLElement;
   private findMatchBtn: HTMLElement;
   private playFriendBtn: HTMLElement;
+  private lobbyBrowserBtn: HTMLElement | null = null;
   private resumeBtn: HTMLElement;
   private pauseRestartBtn: HTMLElement;
   private pauseMenuBtn: HTMLElement;
   private rematchBtn: HTMLElement;
   private menuBtn: HTMLElement;
+
+  // Lobby Modal Elements
+  private lobbyModalEl: HTMLElement | null = null;
+  private closeLobbyBtn: HTMLElement | null = null;
+  private exitLobbyBtn: HTMLElement | null = null;
+  private lobbyRefreshBtn: HTMLElement | null = null;
+  private lobbyOpenCreateBtn: HTMLElement | null = null;
+  private lobbyCancelCreateBtn: HTMLElement | null = null;
+  private lobbySubmitCreateBtn: HTMLElement | null = null;
+  private lobbyCreatePanelEl: HTMLElement | null = null;
+  private lobbyHostingViewEl: HTMLElement | null = null;
+  private lobbyCancelHostBtn: HTMLElement | null = null;
+  private hostingRoomCodeEl: HTMLElement | null = null;
+  private hostingRoomTitleEl: HTMLElement | null = null;
+  private lobbyRoomsBodyEl: HTMLElement | null = null;
+  private createRoomNameInput: HTMLInputElement | null = null;
+  private createRoomScoreSelect: HTMLSelectElement | null = null;
+  private createModePongBtn: HTMLElement | null = null;
+  private createModeCurveBtn: HTMLElement | null = null;
+  private lobbyOnlineValEl: HTMLElement | null = null;
+  private lobbyLookingValEl: HTMLElement | null = null;
+  private lobbyPlayingValEl: HTMLElement | null = null;
+  private lobbyPongValEl: HTMLElement | null = null;
+  private lobbyCurveValEl: HTMLElement | null = null;
+  private lobbyFilter: 'ALL' | 'PONG' | 'CURVE' = 'ALL';
+  private lobbyPollTimer: number | null = null;
+  private currentCreateMode: GameModeType = 'PONG';
 
   // Matchmaking Modal Elements
   private mmModalEl: HTMLElement;
@@ -169,11 +200,41 @@ export class HUD {
     this.startBtn = document.getElementById('start-btn')!;
     this.findMatchBtn = document.getElementById('find-match-btn')!;
     this.playFriendBtn = document.getElementById('play-friend-btn')!;
+    this.lobbyBrowserBtn = document.getElementById('lobby-browser-btn');
     this.resumeBtn = document.getElementById('resume-btn')!;
     this.pauseRestartBtn = document.getElementById('pause-restart-btn')!;
     this.pauseMenuBtn = document.getElementById('pause-menu-btn')!;
     this.rematchBtn = document.getElementById('rematch-btn')!;
     this.menuBtn = document.getElementById('menu-btn')!;
+
+    // Online & Mode breakdown counters
+    this.onlineCountEl = document.getElementById('online-count');
+    this.pongGamesCountEl = document.getElementById('pong-games-count');
+    this.curveGamesCountEl = document.getElementById('curve-games-count');
+
+    // Lobby Modal Elements
+    this.lobbyModalEl = document.getElementById('lobby-modal');
+    this.closeLobbyBtn = document.getElementById('close-lobby-btn');
+    this.exitLobbyBtn = document.getElementById('exit-lobby-btn');
+    this.lobbyRefreshBtn = document.getElementById('lobby-refresh-btn');
+    this.lobbyOpenCreateBtn = document.getElementById('lobby-open-create-btn');
+    this.lobbyCancelCreateBtn = document.getElementById('lobby-cancel-create-btn');
+    this.lobbySubmitCreateBtn = document.getElementById('lobby-submit-create-btn');
+    this.lobbyCreatePanelEl = document.getElementById('lobby-create-panel');
+    this.lobbyHostingViewEl = document.getElementById('lobby-hosting-view');
+    this.lobbyCancelHostBtn = document.getElementById('lobby-cancel-host-btn');
+    this.hostingRoomCodeEl = document.getElementById('hosting-room-code');
+    this.hostingRoomTitleEl = document.getElementById('hosting-room-title');
+    this.lobbyRoomsBodyEl = document.getElementById('lobby-rooms-body');
+    this.createRoomNameInput = document.getElementById('create-room-name') as HTMLInputElement | null;
+    this.createRoomScoreSelect = document.getElementById('create-room-score') as HTMLSelectElement | null;
+    this.createModePongBtn = document.getElementById('create-mode-pong');
+    this.createModeCurveBtn = document.getElementById('create-mode-curve');
+    this.lobbyOnlineValEl = document.getElementById('lobby-online-val');
+    this.lobbyLookingValEl = document.getElementById('lobby-looking-val');
+    this.lobbyPlayingValEl = document.getElementById('lobby-playing-val');
+    this.lobbyPongValEl = document.getElementById('lobby-pong-val');
+    this.lobbyCurveValEl = document.getElementById('lobby-curve-val');
 
     // Matchmaking Modal
     this.mmModalEl = document.getElementById('matchmaking-modal')!;
@@ -345,6 +406,86 @@ export class HUD {
     this.playFriendBtn.addEventListener('click', () => {
       this.openMatchmaking('friend');
     });
+
+    // Lobby Browser Button
+    if (this.lobbyBrowserBtn) {
+      this.lobbyBrowserBtn.addEventListener('click', () => {
+        this.openLobbyBrowser();
+      });
+    }
+
+    // Lobby Controls
+    if (this.closeLobbyBtn) {
+      this.closeLobbyBtn.addEventListener('click', () => this.closeLobbyBrowser());
+    }
+    if (this.exitLobbyBtn) {
+      this.exitLobbyBtn.addEventListener('click', () => this.closeLobbyBrowser());
+    }
+    if (this.lobbyRefreshBtn) {
+      this.lobbyRefreshBtn.addEventListener('click', () => this.refreshLobbyRooms());
+    }
+
+    // Lobby Mode Filter Buttons
+    const filterBtns = document.querySelectorAll<HTMLButtonElement>('.lobby-filter-btn');
+    filterBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const f = btn.getAttribute('data-lobby-filter') as 'ALL' | 'PONG' | 'CURVE';
+        this.lobbyFilter = f || 'ALL';
+        this.refreshLobbyRooms();
+      });
+    });
+
+    // Lobby Create Room Panel Toggling
+    if (this.lobbyOpenCreateBtn) {
+      this.lobbyOpenCreateBtn.addEventListener('click', () => {
+        if (this.lobbyCreatePanelEl) {
+          this.lobbyCreatePanelEl.style.display = 'block';
+          if (this.createRoomNameInput) {
+            this.createRoomNameInput.value = `${this.network.localUsername}'s Game`;
+            this.createRoomNameInput.focus();
+          }
+        }
+      });
+    }
+
+    if (this.lobbyCancelCreateBtn) {
+      this.lobbyCancelCreateBtn.addEventListener('click', () => {
+        if (this.lobbyCreatePanelEl) this.lobbyCreatePanelEl.style.display = 'none';
+      });
+    }
+
+    // Game Mode selection pills in Create Form
+    if (this.createModePongBtn && this.createModeCurveBtn) {
+      this.createModePongBtn.addEventListener('click', () => {
+        this.createModePongBtn!.classList.add('active');
+        this.createModeCurveBtn!.classList.remove('active');
+        this.currentCreateMode = 'PONG';
+        if (this.createRoomScoreSelect) this.createRoomScoreSelect.value = '11';
+      });
+
+      this.createModeCurveBtn.addEventListener('click', () => {
+        this.createModeCurveBtn!.classList.add('active');
+        this.createModePongBtn!.classList.remove('active');
+        this.currentCreateMode = 'CURVE';
+        if (this.createRoomScoreSelect) this.createRoomScoreSelect.value = '5';
+      });
+    }
+
+    // Submit Create Room
+    if (this.lobbySubmitCreateBtn) {
+      this.lobbySubmitCreateBtn.addEventListener('click', async () => {
+        await this.handleLobbyRoomCreation();
+      });
+    }
+
+    // Cancel Active Host
+    if (this.lobbyCancelHostBtn) {
+      this.lobbyCancelHostBtn.addEventListener('click', async () => {
+        await this.handleLobbyCancelHost();
+      });
+    }
 
     // Matchmaking Modal Controls
     this.closeMmBtn.addEventListener('click', () => this.closeMatchmaking());
@@ -558,9 +699,39 @@ export class HUD {
     });
 
     // Presence update listener
-    this.eventBus.on('presence:updated', ({ lookingCount, playingCount }) => {
-      this.queueCountEl.textContent = String(lookingCount);
-      this.playingCountEl.textContent = String(playingCount);
+    this.eventBus.on('presence:updated', (data) => {
+      this.queueCountEl.textContent = String(data.lookingCount || 0);
+      this.playingCountEl.textContent = String(data.playingCount || 0);
+      if (this.onlineCountEl && data.onlineCount !== undefined) {
+        this.onlineCountEl.textContent = String(data.onlineCount);
+      }
+      if (this.pongGamesCountEl && data.pongGamesCount !== undefined) {
+        this.pongGamesCountEl.textContent = String(data.pongGamesCount);
+      }
+      if (this.curveGamesCountEl && data.curveGamesCount !== undefined) {
+        this.curveGamesCountEl.textContent = String(data.curveGamesCount);
+      }
+
+      // Update Lobby modal stats strip if present
+      if (this.lobbyOnlineValEl && data.onlineCount !== undefined) {
+        this.lobbyOnlineValEl.textContent = String(data.onlineCount);
+      }
+      if (this.lobbyLookingValEl) {
+        this.lobbyLookingValEl.textContent = String(data.lookingCount || 0);
+      }
+      if (this.lobbyPlayingValEl) {
+        this.lobbyPlayingValEl.textContent = String(data.playingCount || 0);
+      }
+      if (this.lobbyPongValEl && data.pongGamesCount !== undefined) {
+        this.lobbyPongValEl.textContent = String(data.pongGamesCount);
+      }
+      if (this.lobbyCurveValEl && data.curveGamesCount !== undefined) {
+        this.lobbyCurveValEl.textContent = String(data.curveGamesCount);
+      }
+
+      if (data.rooms && this.lobbyModalEl?.classList.contains('active')) {
+        this.renderLobbyRooms(data.rooms);
+      }
     });
 
     // Network connection status
@@ -994,4 +1165,188 @@ export class HUD {
   public hideGameOver(): void {
     this.gameOverEl.classList.remove('active');
   }
+
+  // ================= LOBBY BROWSER SYSTEM =================
+
+  public async openLobbyBrowser(): Promise<void> {
+    if (!this.lobbyModalEl) return;
+    this.lobbyModalEl.classList.add('active');
+
+    // Refresh immediately
+    await this.refreshLobbyRooms();
+
+    // Start 3-second polling interval while browser is open
+    if (this.lobbyPollTimer !== null) clearInterval(this.lobbyPollTimer);
+    this.lobbyPollTimer = window.setInterval(async () => {
+      if (!this.lobbyModalEl?.classList.contains('active')) {
+        if (this.lobbyPollTimer !== null) {
+          clearInterval(this.lobbyPollTimer);
+          this.lobbyPollTimer = null;
+        }
+        return;
+      }
+      await this.refreshLobbyRooms();
+    }, 3000);
+  }
+
+  public async closeLobbyBrowser(): Promise<void> {
+    if (!this.lobbyModalEl) return;
+    this.lobbyModalEl.classList.remove('active');
+    if (this.lobbyPollTimer !== null) {
+      clearInterval(this.lobbyPollTimer);
+      this.lobbyPollTimer = null;
+    }
+    if (this.lobbyCreatePanelEl) {
+      this.lobbyCreatePanelEl.style.display = 'none';
+    }
+  }
+
+  public async refreshLobbyRooms(): Promise<void> {
+    try {
+      const data = await this.network.fetchLobbyRooms();
+      if (data && data.rooms) {
+        this.renderLobbyRooms(data.rooms);
+      }
+    } catch (e) {
+      console.warn('[HUD] Error refreshing lobby rooms:', e);
+    }
+  }
+
+  private renderLobbyRooms(rooms: LobbyRoom[]): void {
+    if (!this.lobbyRoomsBodyEl) return;
+
+    // Filter rooms by mode
+    let filtered = rooms || [];
+    if (this.lobbyFilter !== 'ALL') {
+      filtered = filtered.filter(r => r.gameMode === this.lobbyFilter);
+    }
+
+    if (filtered.length === 0) {
+      this.lobbyRoomsBodyEl.innerHTML = `
+        <tr class="lobby-empty-row">
+          <td colspan="6">
+            ${this.lobbyFilter === 'ALL' ? 'No open rooms at the moment.' : `No open ${this.lobbyFilter} rooms.`}
+            <br/><span style="font-size: 11px; opacity: 0.7;">Click <strong>➕ CREATE ROOM</strong> above to host one!</span>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const currentPeerId = this.network.peer?.id;
+
+    this.lobbyRoomsBodyEl.innerHTML = filtered.map(room => {
+      const isMyRoom = currentPeerId && (room.roomId === currentPeerId || room.roomId.includes(currentPeerId));
+      const isFullOrPlaying = room.status === 'playing' || room.playerCount >= 2;
+      const modeBadge = room.gameMode === 'CURVE'
+        ? `<span class="badge-mode badge-mode-curve">🐍 CURVE</span>`
+        : `<span class="badge-mode badge-mode-pong">🏓 PONG</span>`;
+      const statusBadge = room.status === 'waiting'
+        ? `<span class="badge-status badge-status-waiting">🟢 OPEN (${room.playerCount}/2)</span>`
+        : `<span class="badge-status badge-status-playing">🔵 IN MATCH (${room.playerCount}/2)</span>`;
+
+      return `
+        <tr data-room-id="${room.roomId}" data-room-mode="${room.gameMode}">
+          <td><strong style="color: #fff;">${room.roomName}</strong></td>
+          <td>${modeBadge}</td>
+          <td>${room.hostName}</td>
+          <td>First to ${room.targetScore}</td>
+          <td>${statusBadge}</td>
+          <td style="text-align: right;">
+            ${isMyRoom ? `
+              <span style="font-size: 11px; color: var(--arcade-cyan); font-weight: 700;">YOUR ROOM</span>
+            ` : `
+              <button class="lobby-join-btn" ${isFullOrPlaying ? 'disabled' : ''} data-join-id="${room.roomId}" data-join-mode="${room.gameMode}">
+                ${isFullOrPlaying ? 'FULL' : 'JOIN'}
+              </button>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Attach click listeners to join buttons
+    const joinBtns = this.lobbyRoomsBodyEl.querySelectorAll<HTMLButtonElement>('.lobby-join-btn');
+    joinBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.currentTarget as HTMLButtonElement;
+        const roomId = target.getAttribute('data-join-id');
+        const mode = (target.getAttribute('data-join-mode') || 'PONG') as GameModeType;
+        if (roomId) {
+          await this.joinLobbyRoom(roomId, mode, target);
+        }
+      });
+    });
+  }
+
+  private async joinLobbyRoom(roomId: string, mode: GameModeType, btnEl: HTMLButtonElement): Promise<void> {
+    btnEl.textContent = 'Connecting...';
+    btnEl.disabled = true;
+
+    // Set active game mode before connecting
+    this.selectedGameMode = mode;
+    if (this.onGameModeSelect) {
+      this.onGameModeSelect(mode);
+    }
+
+    const cleanId = roomId.replace(/^SP3D-?/i, '');
+    const connected = await this.network.connectToPeer(cleanId);
+    if (!connected) {
+      btnEl.textContent = 'JOIN';
+      btnEl.disabled = false;
+      this.showCallout('COULD NOT CONNECT TO ROOM', 2000);
+    } else {
+      await this.closeLobbyBrowser();
+    }
+  }
+
+  private async handleLobbyRoomCreation(): Promise<void> {
+    const rawName = this.createRoomNameInput?.value.trim() || `${this.network.localUsername}'s Arena`;
+    const scoreVal = parseInt(this.createRoomScoreSelect?.value || '11', 10);
+    const mode = this.currentCreateMode;
+
+    if (this.lobbySubmitCreateBtn) {
+      this.lobbySubmitCreateBtn.textContent = 'Creating...';
+      this.lobbySubmitCreateBtn.setAttribute('disabled', 'true');
+    }
+
+    // Set HUD active mode
+    this.selectedGameMode = mode;
+    if (this.onGameModeSelect) {
+      this.onGameModeSelect(mode);
+    }
+
+    const code = await this.network.createLobbyRoom(mode, rawName, scoreVal);
+
+    if (this.lobbyCreatePanelEl) {
+      this.lobbyCreatePanelEl.style.display = 'none';
+    }
+    if (this.lobbySubmitCreateBtn) {
+      this.lobbySubmitCreateBtn.textContent = 'HOST & WAIT FOR OPPONENT';
+      this.lobbySubmitCreateBtn.removeAttribute('disabled');
+    }
+
+    // Show hosting banner in lobby
+    if (this.lobbyHostingViewEl) {
+      this.lobbyHostingViewEl.style.display = 'block';
+    }
+    if (this.hostingRoomCodeEl) {
+      this.hostingRoomCodeEl.textContent = code.toUpperCase();
+    }
+    if (this.hostingRoomTitleEl) {
+      this.hostingRoomTitleEl.textContent = `HOSTING ${rawName.toUpperCase()}`;
+    }
+
+    // Trigger immediate refresh so host sees their own room
+    await this.refreshLobbyRooms();
+  }
+
+  private async handleLobbyCancelHost(): Promise<void> {
+    await this.network.closeLobbyRoom();
+    if (this.lobbyHostingViewEl) {
+      this.lobbyHostingViewEl.style.display = 'none';
+    }
+    await this.refreshLobbyRooms();
+  }
 }
+
