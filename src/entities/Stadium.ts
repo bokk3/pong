@@ -83,7 +83,7 @@ export class Stadium {
       this.group.add(barrier);
     });
 
-    // 3. Bleachers & Stylized Arcade Crowd
+    // 3. Bleachers & Stylized Arcade Crowd (Full Stadium surrounding table)
     this.buildBleachersAndCrowd();
 
     // 4. Stadium Lighting (Soft Ambient + Spotlights)
@@ -92,14 +92,63 @@ export class Stadium {
 
   private buildBleachersAndCrowd(): void {
     const bleacherMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
-    const crowdColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0x8b5cf6, 0xec4899];
+    const crowdColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0x8b5cf6, 0xec4899, 0x06b6d4, 0x84cc16];
+    const skinTones = [0xfde047, 0xfcd34d, 0xfbbf24, 0xf87171, 0xd97706, 0x92400e];
 
-    // Background bleacher tiers (facing player from behind the CPU side)
-    const tiers = 4;
-    for (let t = 0; t < tiers; t++) {
-      const stepDepth = 1.0;
-      const stepHeight = 0.5;
-      const zPos = -5.8 - t * stepDepth;
+    const createSpectator = (x: number, y: number, z: number, rotY: number, colorIdx: number): THREE.Group => {
+      const crowdFigure = new THREE.Group();
+      const shirtColor = crowdColors[colorIdx % crowdColors.length];
+      const skinColor = skinTones[(colorIdx * 3) % skinTones.length];
+
+      // Body (Torso)
+      const bodyGeo = new THREE.CylinderGeometry(0.16, 0.18, 0.45, 8);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.5 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.225;
+      crowdFigure.add(body);
+
+      // Head (Rotates to track ball)
+      const headGeo = new THREE.SphereGeometry(0.13, 8, 8);
+      const headMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.6 });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 0.52;
+      head.name = 'head';
+      crowdFigure.add(head);
+
+      // Left Arm / Right Arm (Pumps up during celebration)
+      const armGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.28, 6);
+      const armMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.6 });
+      
+      const leftArm = new THREE.Mesh(armGeo, armMat);
+      leftArm.position.set(-0.21, 0.28, 0);
+      leftArm.rotation.z = Math.PI / 10;
+      leftArm.name = 'leftArm';
+      crowdFigure.add(leftArm);
+
+      const rightArm = new THREE.Mesh(armGeo, armMat);
+      rightArm.position.set(0.21, 0.28, 0);
+      rightArm.rotation.z = -Math.PI / 10;
+      rightArm.name = 'rightArm';
+      crowdFigure.add(rightArm);
+
+      crowdFigure.position.set(x, y, z);
+      crowdFigure.rotation.y = rotY;
+      crowdFigure.userData = {
+        baseY: y,
+        phase: Math.random() * Math.PI * 2,
+        cheerDelay: Math.random() * 0.4,
+        colorIdx
+      };
+
+      return crowdFigure;
+    };
+
+    // 1. Back Bleachers (Behind CPU table, looking south at +Z)
+    const backTiers = 4;
+    for (let t = 0; t < backTiers; t++) {
+      const stepDepth = 0.95;
+      const stepHeight = 0.48;
+      const zPos = -5.6 - t * stepDepth;
       const yPos = (t + 1) * stepHeight;
 
       const stepGeo = new THREE.BoxGeometry(16, stepHeight, stepDepth);
@@ -108,30 +157,57 @@ export class Stadium {
       stepMesh.receiveShadow = true;
       this.group.add(stepMesh);
 
-      // Add stylized low-poly crowd spectators along the tier
-      const count = 12;
+      const count = 16;
       for (let i = 0; i < count; i++) {
-        const xPos = -6.5 + (i * 13) / (count - 1) + (Math.random() - 0.5) * 0.2;
-        const color = crowdColors[(t * count + i) % crowdColors.length];
+        const xPos = -7.0 + (i * 14.0) / (count - 1) + (Math.random() - 0.5) * 0.25;
+        const fig = createSpectator(xPos, yPos, zPos + (Math.random() - 0.5) * 0.1, 0, t * count + i);
+        this.group.add(fig);
+        this.crowdFigures.push(fig);
+      }
+    }
 
-        const crowdFigure = new THREE.Group();
-        // Body (Capsule/Cylinder)
-        const bodyGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.45, 8);
-        const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.225;
-        crowdFigure.add(body);
+    // 2. Left Bleachers (Along -X side of table, looking east toward center)
+    const sideTiers = 3;
+    for (let t = 0; t < sideTiers; t++) {
+      const stepWidth = 0.95;
+      const stepHeight = 0.48;
+      const xPos = -4.8 - t * stepWidth;
+      const yPos = (t + 1) * stepHeight;
 
-        // Head (Sphere)
-        const headGeo = new THREE.SphereGeometry(0.14, 8, 8);
-        const headMat = new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.6 });
-        const head = new THREE.Mesh(headGeo, headMat);
-        head.position.y = 0.52;
-        crowdFigure.add(head);
+      const stepGeo = new THREE.BoxGeometry(stepWidth, stepHeight, 10);
+      const stepMesh = new THREE.Mesh(stepGeo, bleacherMat);
+      stepMesh.position.set(xPos + stepWidth / 2, yPos - stepHeight / 2, -0.5);
+      stepMesh.receiveShadow = true;
+      this.group.add(stepMesh);
 
-        crowdFigure.position.set(xPos, yPos, zPos + (Math.random() - 0.5) * 0.1);
-        this.group.add(crowdFigure);
-        this.crowdFigures.push(crowdFigure);
+      const count = 10;
+      for (let i = 0; i < count; i++) {
+        const zPos = -4.8 + (i * 8.6) / (count - 1) + (Math.random() - 0.5) * 0.2;
+        const fig = createSpectator(xPos + 0.3, yPos, zPos, Math.PI / 2, t * count + i + 100);
+        this.group.add(fig);
+        this.crowdFigures.push(fig);
+      }
+    }
+
+    // 3. Right Bleachers (Along +X side of table, looking west toward center)
+    for (let t = 0; t < sideTiers; t++) {
+      const stepWidth = 0.95;
+      const stepHeight = 0.48;
+      const xPos = 4.8 + t * stepWidth;
+      const yPos = (t + 1) * stepHeight;
+
+      const stepGeo = new THREE.BoxGeometry(stepWidth, stepHeight, 10);
+      const stepMesh = new THREE.Mesh(stepGeo, bleacherMat);
+      stepMesh.position.set(xPos - stepWidth / 2, yPos - stepHeight / 2, -0.5);
+      stepMesh.receiveShadow = true;
+      this.group.add(stepMesh);
+
+      const count = 10;
+      for (let i = 0; i < count; i++) {
+        const zPos = -4.8 + (i * 8.6) / (count - 1) + (Math.random() - 0.5) * 0.2;
+        const fig = createSpectator(xPos - 0.3, yPos, zPos, -Math.PI / 2, t * count + i + 200);
+        this.group.add(fig);
+        this.crowdFigures.push(fig);
       }
     }
   }
@@ -170,11 +246,11 @@ export class Stadium {
 
   public celebrate(): void {
     this.isCelebrating = true;
-    this.celebrateTimer = 2.0;
+    this.celebrateTimer = 2.4;
   }
 
-  public update(dt: number): void {
-    this.crowdBobTime += dt * 3;
+  public update(dt: number, ballPos?: THREE.Vector3): void {
+    this.crowdBobTime += dt;
 
     if (this.celebrateTimer > 0) {
       this.celebrateTimer -= dt;
@@ -183,13 +259,55 @@ export class Stadium {
       }
     }
 
-    const jumpSpeed = this.isCelebrating ? 12 : 2.5;
-    const jumpAmp = this.isCelebrating ? 0.18 : 0.02;
+    const t = this.crowdBobTime;
 
     for (let i = 0; i < this.crowdFigures.length; i++) {
       const fig = this.crowdFigures[i];
-      const offset = i * 0.4;
-      fig.position.y += Math.sin(this.crowdBobTime * (jumpSpeed / 3) + offset) * jumpAmp * dt * 4;
+      const uData = fig.userData as { baseY: number; phase: number; cheerDelay: number; colorIdx: number };
+      const baseY = uData.baseY;
+
+      // 1. Bobbing / Cheering / Mexican Wave Jumping
+      if (this.isCelebrating) {
+        // High excitement jumps with staggered waves
+        const jumpPhase = (t * 10) - (fig.position.x * 0.4) - (fig.position.z * 0.3);
+        const jumpH = Math.max(0, Math.sin(jumpPhase)) * 0.28;
+        fig.position.y = baseY + jumpH;
+
+        // Pump arms up in the air!
+        const leftArm = fig.getObjectByName('leftArm') as THREE.Mesh | null;
+        const rightArm = fig.getObjectByName('rightArm') as THREE.Mesh | null;
+        if (leftArm && rightArm) {
+          leftArm.rotation.z = Math.PI - 0.3 + Math.sin(t * 14 + uData.phase) * 0.2;
+          rightArm.rotation.z = -Math.PI + 0.3 - Math.sin(t * 14 + uData.phase) * 0.2;
+        }
+      } else {
+        // Natural ambient sway and occasional gentle bounces
+        const idleWave = Math.sin(t * 2.5 + uData.phase) * 0.035;
+        fig.position.y = baseY + Math.max(0, idleWave);
+
+        // Relaxed arms
+        const leftArm = fig.getObjectByName('leftArm') as THREE.Mesh | null;
+        const rightArm = fig.getObjectByName('rightArm') as THREE.Mesh | null;
+        if (leftArm && rightArm) {
+          leftArm.rotation.z = (Math.PI / 10) + Math.sin(t * 2 + uData.phase) * 0.05;
+          rightArm.rotation.z = (-Math.PI / 10) - Math.sin(t * 2 + uData.phase) * 0.05;
+        }
+      }
+
+      // 2. Head turning: spectators track the ball across the table!
+      const head = fig.getObjectByName('head') as THREE.Mesh | null;
+      if (head && ballPos) {
+        // Angle toward ball in world space relative to spectator rotation
+        const dx = ballPos.x - fig.position.x;
+        const dz = ballPos.z - fig.position.z;
+        const targetWorldYaw = Math.atan2(dx, dz);
+        const relYaw = targetWorldYaw - fig.rotation.y;
+        
+        // Clamp realistic human neck rotation (-55 deg to +55 deg)
+        const clampedYaw = Math.max(-0.95, Math.min(0.95, relYaw));
+        head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, clampedYaw, dt * 6);
+      }
     }
   }
 }
+

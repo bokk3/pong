@@ -426,6 +426,22 @@ export class Game {
       }
       this.stadium.celebrate();
     });
+
+    // Curve Battle Round Celebrations
+    this.eventBus.on('curve:crash', ({ victim }) => {
+      if (victim === 'CPU') {
+        this.stadium.celebrate();
+        this.sound.playCheer();
+      }
+    });
+
+    this.eventBus.on('curve:match_over', ({ winner }) => {
+      this.sound.playWhistle();
+      if (winner === 'PLAYER') {
+        this.sound.playVictoryJingle();
+      }
+      this.stadium.celebrate();
+    });
   }
 
   private isLocalPlayerTurnToServe(): boolean {
@@ -445,14 +461,15 @@ export class Game {
     this.playerPaddle.group.visible = visible;
     this.cpuPaddle.group.visible = visible;
     this.table.group.visible = visible;
-    this.stadium.group.visible = visible;
+    // Audience & stadium remain always visible around the action
+    this.stadium.group.visible = true;
   }
 
   private startCurveMatch(isMultiplayer: boolean, diff: Difficulty = 'pro'): void {
     this.gameModeType = 'CURVE';
-    this.setEntitiesVisibility(false); // Hides ping pong table, net, stadium, paddles, and ball
+    this.setEntitiesVisibility(false); // Hides ping pong table, net, paddles, and ball (stadium/crowd stays visible)
     this.curveMode.group.visible = true; // Shows plain square 2D arena
-    this.cameraCtrl.setMode('CURVE'); // True 2D top-down view
+    this.cameraCtrl.setMode('CURVE'); // True 2D top-down view looking down at the table and arena
     this.stateMachine.setState('RALLY'); // Active playing state
 
     const oppName = isMultiplayer ? this.network.remoteUsername : `BOT (${diff.toUpperCase()})`;
@@ -598,6 +615,9 @@ export class Game {
       if (this.stateMachine.state !== 'MENU') {
         this.curveMode.update(rawDelta);
         this.vfx.update(rawDelta);
+        // Audience stays active and tracks curve battle leader
+        const leadPos = new THREE.Vector3(this.curveMode.p1.x, 0, this.curveMode.p1.z);
+        this.stadium.update(rawDelta, leadPos);
       }
 
       this.cameraCtrl.update(
@@ -626,7 +646,7 @@ export class Game {
         this.remotePlayerCtrl.update(dt);
       }
       this.ball.update(dt);
-      this.stadium.update(dt);
+      this.stadium.update(dt, this.ball.physics.position);
       this.vfx.update(dt);
       this.vfx.updateTrail(
         this.ball.physics.position,
