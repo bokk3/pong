@@ -1233,11 +1233,23 @@ export class HUD {
       return;
     }
 
+    const escapeHtml = (str: string): string => {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    };
+
     const currentPeerId = this.network.peer?.id;
 
     this.lobbyRoomsBodyEl.innerHTML = filtered.map(room => {
       const isMyRoom = currentPeerId && (room.roomId === currentPeerId || room.roomId.includes(currentPeerId));
       const isFullOrPlaying = room.status === 'playing' || room.playerCount >= 2;
+      const safeRoomName = escapeHtml(room.roomName || 'Arena');
+      const safeHostName = escapeHtml(room.hostName || 'Player');
+      const safeRoomId = escapeHtml(room.roomId);
       const modeBadge = room.gameMode === 'CURVE'
         ? `<span class="badge-mode badge-mode-curve">🐍 CURVE</span>`
         : `<span class="badge-mode badge-mode-pong">🏓 PONG</span>`;
@@ -1246,17 +1258,17 @@ export class HUD {
         : `<span class="badge-status badge-status-playing">🔵 IN MATCH (${room.playerCount}/2)</span>`;
 
       return `
-        <tr data-room-id="${room.roomId}" data-room-mode="${room.gameMode}">
-          <td><strong style="color: #fff;">${room.roomName}</strong></td>
+        <tr data-room-id="${safeRoomId}" data-room-mode="${room.gameMode}">
+          <td><strong style="color: #fff;">${safeRoomName}</strong></td>
           <td>${modeBadge}</td>
-          <td>${room.hostName}</td>
+          <td>${safeHostName}</td>
           <td>First to ${room.targetScore}</td>
           <td>${statusBadge}</td>
           <td style="text-align: right;">
             ${isMyRoom ? `
               <span style="font-size: 11px; color: var(--arcade-cyan); font-weight: 700;">YOUR ROOM</span>
             ` : `
-              <button class="lobby-join-btn" ${isFullOrPlaying ? 'disabled' : ''} data-join-id="${room.roomId}" data-join-mode="${room.gameMode}">
+              <button class="lobby-join-btn" ${isFullOrPlaying ? 'disabled' : ''} data-join-id="${safeRoomId}" data-join-mode="${room.gameMode}">
                 ${isFullOrPlaying ? 'FULL' : 'JOIN'}
               </button>
             `}
