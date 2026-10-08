@@ -261,104 +261,152 @@
         </aside>
 
         <!-- Main Menu Center Card -->
-        <div class="menu-card">
-          <div class="game-logo">
-            <img src="/logo.png" alt="Spin Pong 3D Logo" class="logo-image" />
-            <div class="logo-text-group">
-              <span class="logo-accent">SPIN</span>
-              <span class="logo-title">PONG 3D</span>
-              <span class="logo-badge">ARCADE EDITION</span>
+        <div class="menu-card arcade-hero-card">
+          <!-- Hero Header -->
+          <div class="menu-hero-header">
+            <div class="game-logo">
+              <img src="/logo.png" alt="Spin Pong 3D Logo" class="logo-image" />
+              <div class="logo-text-group">
+                <div class="logo-badge-row">
+                  <span class="logo-badge">ARCADE EDITION</span>
+                  <span class="version-badge">v1.2</span>
+                </div>
+                <h1 class="logo-title"><span class="logo-accent">SPIN</span> PONG 3D</h1>
+                <p class="tagline">Physics-Driven Spin • Tactical Curve • Real-Time P2P</p>
+              </div>
             </div>
-          </div>
-          <p class="tagline">Timing • Spin • Precision • Dynamic Arcade Action</p>
 
-          <!-- Live Edge Presence Counter -->
-          <div class="presence-bar" id="presence-bar">
-            <div class="presence-pill online-pill" title="Total players connected online">
-              <span class="pulse-dot pulse-cyan"></span>
-              <span class="presence-count" id="online-count">1</span>
-              <span class="presence-label">Online</span>
-            </div>
-            <div class="presence-divider">•</div>
-            <div class="presence-pill queue-pill" title="Players looking for a match">
-              <span class="pulse-dot pulse-green"></span>
-              <span class="presence-count" id="queue-count">0</span>
-              <span class="presence-label">Looking</span>
-            </div>
-            <div class="presence-divider">•</div>
-            <div class="presence-pill playing-pill" title="Live games in-progress">
-              <span class="pulse-dot pulse-blue"></span>
-              <span class="presence-count" id="playing-count">0</span>
-              <span class="presence-label">In Match (<span id="pong-games-count">0</span> 🏓 / <span id="curve-games-count">0</span> 🐍)</span>
+            <!-- Live Edge Presence Strip -->
+            <div class="presence-bar" id="presence-bar">
+              <div class="presence-pill online-pill" title="Total players connected online">
+                <span class="pulse-dot pulse-cyan"></span>
+                <span class="presence-count" id="online-count">1</span>
+                <span class="presence-label">Online</span>
+              </div>
+              <div class="presence-divider">•</div>
+              <div class="presence-pill queue-pill" title="Players looking for a match">
+                <span class="pulse-dot pulse-green"></span>
+                <span class="presence-count" id="queue-count">0</span>
+                <span class="presence-label">Looking</span>
+              </div>
+              <div class="presence-divider">•</div>
+              <div class="presence-pill playing-pill" title="Live games in-progress">
+                <span class="pulse-dot pulse-blue"></span>
+                <span class="presence-count" id="playing-count">0</span>
+                <span class="presence-label">In Match (<span id="pong-games-count">0</span> 🏓 / <span id="curve-games-count">0</span> 🐍)</span>
+              </div>
             </div>
           </div>
-          
-          <!-- Game Mode Selector -->
-          <div class="gamemode-picker">
-            <label>SELECT GAME MODE</label>
+
+          <!-- Mode Select Showcase Cards -->
+          <div class="menu-section-block">
+            <div class="section-label-row">
+              <span class="section-label">CHOOSE ARENA MODE</span>
+            </div>
             <div class="gamemode-buttons">
               <button class="gamemode-btn active" id="mode-pong-btn" data-mode="PONG">
-                <span class="gamemode-icon">🏓</span>
-                <span class="gamemode-text">
+                <div class="mode-card-header">
+                  <span class="gamemode-icon">🏓</span>
+                  <span class="mode-tag mode-tag-pong">3D TABLE</span>
+                </div>
+                <div class="gamemode-text">
                   <span class="gamemode-title">CLASSIC PONG</span>
-                  <span class="gamemode-desc">Arcade spin & rallies</span>
-                </span>
+                  <span class="gamemode-desc">Arcade spin rallies & power smashes</span>
+                </div>
               </button>
               <button class="gamemode-btn" id="mode-curve-btn" data-mode="CURVE">
-                <span class="gamemode-icon">🐍</span>
-                <span class="gamemode-text">
+                <div class="mode-card-header">
+                  <span class="gamemode-icon">🐍</span>
+                  <span class="mode-tag mode-tag-curve">2D TACTICAL</span>
+                </div>
+                <div class="gamemode-text">
                   <span class="gamemode-title">CURVE BATTLE</span>
-                  <span class="gamemode-desc">Achtung die Kurve 2D</span>
+                  <span class="gamemode-desc">Achtung die Kurve survival</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Difficulty Selector -->
+          <div class="menu-section-block difficulty-picker" id="difficulty-picker-box">
+            <div class="section-label-row">
+              <span class="section-label">AI OPPONENT LEVEL</span>
+            </div>
+            <div class="difficulty-buttons">
+              <button class="diff-btn" data-diff="novice">
+                <span class="diff-icon">🌱</span>
+                <span class="diff-title">NOVICE</span>
+                <span class="diff-desc">Gentle rallies</span>
+              </button>
+              <button class="diff-btn active" data-diff="pro">
+                <span class="diff-icon">⚡</span>
+                <span class="diff-title">PRO</span>
+                <span class="diff-desc">Sharp spins</span>
+              </button>
+              <button class="diff-btn" data-diff="master">
+                <span class="diff-icon">👑</span>
+                <span class="diff-title">CHAMPION</span>
+                <span class="diff-desc">Relentless AI</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Play Action Hub -->
+          <div class="menu-action-hub">
+            <button id="start-btn" class="primary-btn play-hero-btn">
+              <span class="btn-icon">🚀</span>
+              <span class="btn-text-wrap">
+                <span class="btn-main-title">PLAY VS BOT</span>
+                <span class="btn-sub-title">Instant offline singleplayer</span>
+              </span>
+            </button>
+
+            <div class="multiplayer-hub-grid">
+              <button id="lobby-browser-btn" class="secondary-btn lobby-pulse-btn hub-btn">
+                <span class="hub-btn-icon">🌐</span>
+                <span class="hub-btn-text">
+                  <strong>PUBLIC LOBBIES</strong>
+                  <small>Browse & Host</small>
+                </span>
+              </button>
+
+              <button id="find-match-btn" class="secondary-btn multiplayer-glow-btn hub-btn">
+                <span class="hub-btn-icon">⚡</span>
+                <span class="hub-btn-text">
+                  <strong>QUICK MATCH</strong>
+                  <small>Auto Matchmaking</small>
+                </span>
+              </button>
+
+              <button id="play-friend-btn" class="secondary-btn hub-btn">
+                <span class="hub-btn-icon">👥</span>
+                <span class="hub-btn-text">
+                  <strong>PRIVATE ROOM</strong>
+                  <small>Room Code</small>
                 </span>
               </button>
             </div>
           </div>
 
-          <div class="difficulty-picker" id="difficulty-picker-box">
-            <label>CHOOSE YOUR OPPONENT</label>
-            <div class="difficulty-buttons">
-              <button class="diff-btn" data-diff="novice">
-                <span class="diff-title">NOVICE</span>
-                <span class="diff-desc">Gentle rallies, forgiving pace</span>
-              </button>
-              <button class="diff-btn active" data-diff="pro">
-                <span class="diff-title">PRO</span>
-                <span class="diff-desc">Fast spins & sharp angles</span>
-              </button>
-              <button class="diff-btn" data-diff="master">
-                <span class="diff-title">CHAMPION</span>
-                <span class="diff-desc">Relentless smashes & Magnus curves</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="menu-settings-box">
-            <div class="menu-setting-row">
-              <label>Controls Sensitivity: <span id="menu-sens-val">1.2x</span></label>
+          <!-- Quick Settings & Guide Bottom Bar -->
+          <div class="menu-bottom-bar">
+            <div class="bottom-sens-control">
+              <span class="sens-icon">🎯</span>
+              <label for="menu-sensitivity-slider">Sensitivity:</label>
               <input type="range" id="menu-sensitivity-slider" min="0.5" max="2.5" step="0.1" value="1.2" />
+              <span id="menu-sens-val" class="sens-val-pill">1.2x</span>
             </div>
-            <button id="menu-webcam-toggle-btn" class="arcade-toggle-btn large">
-              <span class="cam-icon">📷</span>
-              <span class="cam-label">Enable Webcam Hand-Swipe Mode <span class="beta-tag">BETA</span></span>
-            </button>
-          </div>
 
-          <div class="menu-actions">
-            <button id="start-btn" class="secondary-btn bot-match-btn">
-              <span class="btn-icon">🤖</span> PLAY VS BOT
-            </button>
-            <button id="lobby-browser-btn" class="primary-btn lobby-pulse-btn">
-              <span class="btn-icon">🌐</span> MULTIPLAYER LOBBY
-            </button>
-            <button id="find-match-btn" class="secondary-btn multiplayer-glow-btn">
-              <span class="btn-icon">⚡</span> QUICK MATCH (P2P)
-            </button>
-            <button id="play-friend-btn" class="secondary-btn">
-              <span class="btn-icon">👥</span> PRIVATE CODE
-            </button>
-            <button id="mobile-guide-btn" class="secondary-btn mobile-guide-toggle-btn">
-              <span class="btn-icon">📖</span> HOW TO PLAY
-            </button>
+            <div class="bottom-aux-actions">
+              <button id="menu-webcam-toggle-btn" class="arcade-toggle-btn mini-aux-btn">
+                <span class="cam-icon">📷</span>
+                <span class="cam-label">Webcam <span class="beta-tag">BETA</span></span>
+              </button>
+
+              <button id="mobile-guide-btn" class="secondary-btn mini-aux-btn mobile-guide-toggle-btn">
+                <span class="btn-icon">📖</span> Guide
+              </button>
+            </div>
           </div>
         </div>
       </div>
