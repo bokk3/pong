@@ -461,13 +461,15 @@ export class Game {
     this.playerPaddle.group.visible = visible;
     this.cpuPaddle.group.visible = visible;
     this.table.group.visible = visible;
-    // Audience & stadium remain always visible around the action
+    // Wood court floor & ping pong barriers are visible for Pong, hidden in Curve mode to avoid Z-fighting
+    this.stadium.setCourtVisible(visible);
+    // Crowd bleachers and spectators stay active & visible in both modes
     this.stadium.group.visible = true;
   }
 
   private startCurveMatch(isMultiplayer: boolean, diff: Difficulty = 'pro'): void {
     this.gameModeType = 'CURVE';
-    this.setEntitiesVisibility(false); // Hides ping pong table, net, paddles, and ball (stadium/crowd stays visible)
+    this.setEntitiesVisibility(false); // Hides ping pong table, net, paddles, ball, and wood floor (stadium crowd stays visible)
     this.curveMode.group.visible = true; // Shows plain square 2D arena
     this.cameraCtrl.setMode('CURVE'); // True 2D top-down view looking down at the table and arena
     this.stateMachine.setState('RALLY'); // Active playing state

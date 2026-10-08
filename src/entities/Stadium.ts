@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 export class Stadium {
   public group: THREE.Group;
+  public courtGroup: THREE.Group;
+  public crowdGroup: THREE.Group;
   private crowdFigures: THREE.Group[] = [];
   private crowdBobTime: number = 0;
   private isCelebrating: boolean = false;
@@ -9,7 +11,15 @@ export class Stadium {
 
   constructor() {
     this.group = new THREE.Group();
+    this.courtGroup = new THREE.Group();
+    this.crowdGroup = new THREE.Group();
+    this.group.add(this.courtGroup);
+    this.group.add(this.crowdGroup);
     this.buildStadium();
+  }
+
+  public setCourtVisible(visible: boolean): void {
+    this.courtGroup.visible = visible;
   }
 
   private buildStadium(): void {
@@ -44,7 +54,7 @@ export class Stadium {
     const floorMesh = new THREE.Mesh(floorGeo, floorMat);
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.receiveShadow = true;
-    this.group.add(floorMesh);
+    this.courtGroup.add(floorMesh);
 
     // Court boundary lines on floor
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.35, transparent: true });
@@ -53,7 +63,7 @@ export class Stadium {
     courtBorder.rotation.x = -Math.PI / 2;
     courtBorder.rotation.z = Math.PI / 4;
     courtBorder.position.y = 0.001;
-    this.group.add(courtBorder);
+    this.courtGroup.add(courtBorder);
 
     // 2. Surrounds / Court Barriers (Red & Blue A-Frame Barriers)
     const barrierGeo = new THREE.BoxGeometry(2.3, 0.65, 0.08);
@@ -80,7 +90,7 @@ export class Stadium {
       barrier.rotation.y = b.rotY;
       barrier.castShadow = true;
       barrier.receiveShadow = true;
-      this.group.add(barrier);
+      this.courtGroup.add(barrier);
     });
 
     // 3. Bleachers & Stylized Arcade Crowd (Full Stadium surrounding table)

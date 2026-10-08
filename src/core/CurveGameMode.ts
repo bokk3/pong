@@ -48,45 +48,46 @@ export class CurveGameMode {
     const size = 4.8; // Expanded square canvas
     const half = size / 2;
 
-    // 1. Dark, crisp matte arena floor (like classic Achtung die Kurve DOS canvas)
+    // 1. Dark, crisp matte arena floor (elevated cleanly above any court elements)
     const floorGeo = new THREE.PlaneGeometry(size, size);
     const floorMat = new THREE.MeshBasicMaterial({
       color: 0x070c18, // Deep dark retro navy
-      side: THREE.DoubleSide
+      side: THREE.FrontSide
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, 0);
+    floor.position.set(0, 0.04, 0);
     this.group.add(floor);
 
     // 2. Subtle grid lines on the square arena
     const gridHelper = new THREE.GridHelper(size, 20, 0x1e293b, 0x0f172a);
-    gridHelper.position.y = 0.001;
+    gridHelper.position.y = 0.042;
     this.group.add(gridHelper);
 
     // 3. Glowing outer boundary walls (classic Achtung border)
     const borderMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     const wallThick = 0.025;
-    const wallHeight = 0.05;
+    const wallHeight = 0.06;
+    const wallY = 0.04 + wallHeight / 2;
 
     // Top wall (+Z)
     const wallTop = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
-    wallTop.position.set(0, wallHeight / 2, half + wallThick / 2);
+    wallTop.position.set(0, wallY, half + wallThick / 2);
     this.group.add(wallTop);
 
     // Bottom wall (-Z)
     const wallBottom = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
-    wallBottom.position.set(0, wallHeight / 2, -half - wallThick / 2);
+    wallBottom.position.set(0, wallY, -half - wallThick / 2);
     this.group.add(wallBottom);
 
     // Left wall (-X)
     const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
-    wallLeft.position.set(-half - wallThick / 2, wallHeight / 2, 0);
+    wallLeft.position.set(-half - wallThick / 2, wallY, 0);
     this.group.add(wallLeft);
 
     // Right wall (+X)
     const wallRight = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
-    wallRight.position.set(half + wallThick / 2, wallHeight / 2, 0);
+    wallRight.position.set(half + wallThick / 2, wallY, 0);
     this.group.add(wallRight);
   }
 

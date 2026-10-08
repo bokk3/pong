@@ -73,7 +73,7 @@ export class CurveController {
     this.isBot = isBot;
     this.config = { ...DEFAULT_CONFIG, ...config };
 
-    this.trail = new CurveTrail(color, 0.005);
+    this.trail = new CurveTrail(color, 0.046);
 
     // Head sphere
     const headGeo = new THREE.SphereGeometry(this.config.headRadius * 1.25, 16, 16);
@@ -85,7 +85,7 @@ export class CurveController {
       metalness: 0.9
     });
     this.headMesh = new THREE.Mesh(headGeo, headMat);
-    this.headMesh.position.y = 0.012;
+    this.headMesh.position.y = 0.052;
 
     // Outer square boundaries with small safety padding
     const margin = 0.04;
