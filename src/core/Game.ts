@@ -222,6 +222,12 @@ export class Game {
     this.hud.onStartMultiplayerMatch = (_role: MultiplayerRole, remoteUsername: string) => {
       this.sound.init();
       this.mode = 'MULTIPLAYER';
+
+      // Ensure GameModeType matches NetworkManager's activeGameMode if synced from Host
+      if (this.network.activeGameMode && this.network.activeGameMode !== this.gameModeType) {
+        this.gameModeType = this.network.activeGameMode;
+      }
+
       if (this.gameModeType === 'CURVE') {
         this.startCurveMatch(true);
       } else {

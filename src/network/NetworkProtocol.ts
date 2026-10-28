@@ -18,6 +18,9 @@ export type NetworkMessageType =
 export interface HandshakeMessage {
   type: 'HANDSHAKE';
   username: string;
+  gameMode?: 'PONG' | 'CURVE';
+  targetScore?: number;
+  role?: 'HOST' | 'CLIENT';
 }
 
 export interface PaddleMoveMessage {

@@ -128,7 +128,7 @@ export type GameEvents = {
   'match:over': { winner: PlayerId; score: MatchScore };
   'camera:shake': { intensity: number; duration: number };
   'network:ping': { pingMs: number };
-  'network:status': { status: 'disconnected' | 'connecting' | 'connected'; message?: string; role?: MultiplayerRole; remoteUsername?: string };
+  'network:status': { status: 'disconnected' | 'connecting' | 'connected'; message?: string; role?: MultiplayerRole; remoteUsername?: string; gameMode?: 'PONG' | 'CURVE'; targetScore?: number };
   'presence:updated': PresenceStats;
   'multiplayer:rematch': { from: 'local' | 'remote'; status: 'requested' | 'accepted' | 'declined' };
   'device:orientation': { orientation: 'portrait' | 'landscape'; isPortrait: boolean };

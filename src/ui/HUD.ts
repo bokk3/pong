@@ -129,6 +129,7 @@ export class HUD {
   private remoteRematchRequested: boolean = false;
   private matchmakingPollTimer: number | null = null;
   private isStartingMatch: boolean = false;
+  private lobbyWsUnsubscribe: (() => void) | null = null;
 
   // Touch controls for Curve
   private curveTouchControlsEl: HTMLElement | null = null;
@@ -735,12 +736,22 @@ export class HUD {
     });
 
     // Network connection status
-    this.eventBus.on('network:status', ({ status, role, remoteUsername, message }) => {
+    this.eventBus.on('network:status', ({ status, role, remoteUsername, message, gameMode, targetScore }) => {
       if (status === 'connected') {
         this.mmStatusTitleEl.textContent = 'Opponent Connected!';
         this.mmStatusSubEl.textContent = `Matched with ${remoteUsername} (Direct P2P)`;
         this.hudPingBadgeEl.style.display = 'flex';
         this.currentMode = 'MULTIPLAYER';
+
+        // Synchronize HUD game mode if passed from network handshake
+        if (gameMode && this.onGameModeSelect && gameMode !== this.selectedGameMode) {
+          this.selectedGameMode = gameMode;
+          this.onGameModeSelect(gameMode);
+        }
+
+        if (targetScore) {
+          this.matchInfoEl.textContent = `FIRST TO ${targetScore}`;
+        }
 
         this.setOpponentName(remoteUsername ? remoteUsername.toUpperCase() : 'OPPONENT');
         this.setPlayerName(this.network.localUsername.toUpperCase());
@@ -750,11 +761,12 @@ export class HUD {
 
         setTimeout(() => {
           this.closeMatchmaking();
+          this.closeLobbyBrowser(); // DISMISS LOBBY MODAL ON HOST & JOINER!
           this.hideMainMenu();
           if (this.onStartMultiplayerMatch) {
             this.onStartMultiplayerMatch(role || 'CLIENT', remoteUsername || 'Opponent');
           }
-        }, 500);
+        }, 400);
       } else if (status === 'disconnected') {
         this.isStartingMatch = false;
         this.hudPingBadgeEl.style.display = 'none';
@@ -1175,6 +1187,14 @@ export class HUD {
     // Refresh immediately
     await this.refreshLobbyRooms();
 
+    // Subscribe to real-time pubsub WebSocket updates
+    if (this.lobbyWsUnsubscribe) {
+      this.lobbyWsUnsubscribe();
+    }
+    this.lobbyWsUnsubscribe = this.network.subscribeToLobbyUpdates((rooms) => {
+      this.renderLobbyRooms(rooms);
+    });
+
     // Start 3-second polling interval while browser is open
     if (this.lobbyPollTimer !== null) clearInterval(this.lobbyPollTimer);
     this.lobbyPollTimer = window.setInterval(async () => {
@@ -1192,6 +1212,10 @@ export class HUD {
   public async closeLobbyBrowser(): Promise<void> {
     if (!this.lobbyModalEl) return;
     this.lobbyModalEl.classList.remove('active');
+    if (this.lobbyWsUnsubscribe) {
+      this.lobbyWsUnsubscribe();
+      this.lobbyWsUnsubscribe = null;
+    }
     if (this.lobbyPollTimer !== null) {
       clearInterval(this.lobbyPollTimer);
       this.lobbyPollTimer = null;

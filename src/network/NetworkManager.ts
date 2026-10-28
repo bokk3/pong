@@ -4,8 +4,13 @@ import { MultiplayerRole } from '../types';
 import { NetworkMessage } from './NetworkProtocol';
 
 const PEER_PREFIX = 'sp3d-';
+const GLOBAL_ROOMS_ENDPOINT = 'https://ntfy.sh/sp3d_arcade_rooms_v1';
+const GLOBAL_ROOMS_WS = 'wss://ntfy.sh/sp3d_arcade_rooms_v1/ws';
+
 const STUN_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:global.stun.twilio.com:3478' }
 ];
 
@@ -24,12 +29,16 @@ export class NetworkManager {
   public role: MultiplayerRole = 'HOST';
   public localUsername: string = 'Player';
   public remoteUsername: string = 'Opponent';
+  public hostedTargetScore: number = 11;
+  public activeGameMode: 'PONG' | 'CURVE' = 'PONG';
+  public hostedRoomId: string | null = null;
 
   public isConnected: boolean = false;
   public isSearching: boolean = false;
   public pingMs: number = 0;
   private pingInterval: number | null = null;
   private presenceInterval: number | null = null;
+  private roomHeartbeatTimer: number | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private isHandshakeComplete: boolean = false;
 
@@ -185,12 +194,13 @@ export class NetworkManager {
 
       this.role = 'CLIENT';
 
+      // 9 second timeout for mobile & home NAT traversal
       const timeout = setTimeout(() => {
         if (!this.isConnected) {
           try { outgoing.close(); } catch {}
           resolve(false);
         }
-      }, 4000);
+      }, 9000);
 
       outgoing.on('open', () => {
         clearTimeout(timeout);
@@ -214,17 +224,22 @@ export class NetworkManager {
       this.isConnected = true;
       this.startPingHeartbeat();
 
-      // Send initial handshake
+      // Send initial handshake with game mode and target score
       this.send({
         type: 'HANDSHAKE',
-        username: this.localUsername
+        username: this.localUsername,
+        gameMode: this.activeGameMode,
+        targetScore: this.hostedTargetScore,
+        role: this.role
       });
 
       // Emit connected status
       this.eventBus.emit('network:status', {
         status: 'connected',
         role: this.role,
-        remoteUsername: this.remoteUsername
+        remoteUsername: this.remoteUsername,
+        gameMode: this.activeGameMode,
+        targetScore: this.hostedTargetScore
       });
 
       this.reportPresence('playing');
@@ -270,19 +285,40 @@ export class NetworkManager {
     }
 
     if (msg.type === 'HANDSHAKE') {
+      this.isConnected = true;
+      if (!this.pingInterval) {
+        this.startPingHeartbeat();
+      }
       this.remoteUsername = msg.username || 'Opponent';
+
+      // Synchronize game mode and target score from HOST to CLIENT
+      if (this.role === 'CLIENT') {
+        if (msg.gameMode) {
+          this.activeGameMode = msg.gameMode;
+        }
+        if (msg.targetScore) {
+          this.hostedTargetScore = msg.targetScore;
+        }
+      }
+
       if (!this.isHandshakeComplete) {
         this.isHandshakeComplete = true;
-        // Reply with local username if we are receiver
+        // Reply with local metadata
         this.send({
           type: 'HANDSHAKE',
-          username: this.localUsername
+          username: this.localUsername,
+          gameMode: this.activeGameMode,
+          targetScore: this.hostedTargetScore,
+          role: this.role
         });
       }
+
       this.eventBus.emit('network:status', {
         status: 'connected',
         role: this.role,
-        remoteUsername: this.remoteUsername
+        remoteUsername: this.remoteUsername,
+        gameMode: this.activeGameMode,
+        targetScore: this.hostedTargetScore
       });
       return;
     }
@@ -327,6 +363,10 @@ export class NetworkManager {
     this.isSearching = false;
     this.isHandshakeComplete = false;
     this.stopPingHeartbeat();
+    if (this.roomHeartbeatTimer) {
+      clearInterval(this.roomHeartbeatTimer);
+      this.roomHeartbeatTimer = null;
+    }
     if (this.conn) {
       try { this.conn.close(); } catch {}
       this.conn = null;
@@ -366,9 +406,6 @@ export class NetworkManager {
 
     return null;
   }
-
-  public activeGameMode: 'PONG' | 'CURVE' = 'PONG';
-  public hostedRoomId: string | null = null;
 
   // --- Presence & Queue Heartbeats ---
   private startPresenceReporting(): void {
@@ -441,40 +478,168 @@ export class NetworkManager {
   public async createLobbyRoom(gameMode: 'PONG' | 'CURVE', customRoomName?: string, targetScore?: number): Promise<string> {
     const code = await this.initPeer();
     this.activeGameMode = gameMode;
-    this.hostedRoomId = this.peer?.id || code;
-    await this.reportPresence('searching', 'create_room', {
+    this.hostedTargetScore = targetScore || (gameMode === 'CURVE' ? 5 : 11);
+    this.hostedRoomId = this.peer?.id || `${PEER_PREFIX}${code}`;
+
+    const manifest = {
+      action: 'ROOM_ANNOUNCE',
       roomId: this.hostedRoomId,
       roomName: customRoomName || `${this.localUsername}'s ${gameMode === 'CURVE' ? 'Curve' : 'Pong'} Arena`,
-      gameMode,
-      targetScore: targetScore || (gameMode === 'CURVE' ? 5 : 11)
-    });
+      hostName: this.localUsername,
+      gameMode: this.activeGameMode,
+      targetScore: this.hostedTargetScore,
+      status: 'waiting',
+      playerCount: 1,
+      timestamp: Date.now()
+    };
+
+    // 1. Broadcast to global cross-device relay
+    await this.publishGlobalRoom(manifest);
+
+    // 2. Start 4-second heartbeat while waiting
+    if (this.roomHeartbeatTimer) clearInterval(this.roomHeartbeatTimer);
+    this.roomHeartbeatTimer = window.setInterval(() => {
+      if (this.hostedRoomId && !this.isConnected) {
+        this.publishGlobalRoom({ ...manifest, timestamp: Date.now() });
+      }
+    }, 4000);
+
     return code;
   }
 
   public async closeLobbyRoom(): Promise<void> {
+    if (this.roomHeartbeatTimer) {
+      clearInterval(this.roomHeartbeatTimer);
+      this.roomHeartbeatTimer = null;
+    }
     if (this.hostedRoomId) {
-      await this.reportPresence('menu', 'close_room', { roomId: this.hostedRoomId });
+      await this.publishGlobalRoom({
+        action: 'ROOM_CLOSED',
+        roomId: this.hostedRoomId
+      });
       this.hostedRoomId = null;
     }
   }
 
+  private async publishGlobalRoom(data: Record<string, any>): Promise<void> {
+    try {
+      await fetch(GLOBAL_ROOMS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    } catch {}
+
+    // Fallback to local /api/presence
+    this.reportPresence('searching', data.action === 'ROOM_CLOSED' ? 'close_room' : 'update_room', {
+      roomId: data.roomId,
+      roomName: data.roomName,
+      gameMode: data.gameMode,
+      targetScore: data.targetScore
+    });
+  }
+
   public async fetchLobbyRooms(): Promise<{ lookingCount: number; playingCount: number; onlineCount?: number; pongGamesCount?: number; curveGamesCount?: number; rooms: any[] }> {
+    const globalRoomsMap = new Map<string, any>();
+    const now = Date.now();
+
+    // 1. Query global relay (last 20 seconds)
+    try {
+      const res = await fetch(`${GLOBAL_ROOMS_ENDPOINT}/json?poll=1&since=20s`, { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        const lines = text.trim().split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const ev = JSON.parse(line);
+            if (ev.event === 'message' && ev.message) {
+              const msgData = JSON.parse(ev.message);
+              if (msgData.action === 'ROOM_ANNOUNCE' && msgData.roomId) {
+                // Heartbeat must be within 25 seconds
+                if (now - (msgData.timestamp || 0) < 25000) {
+                  globalRoomsMap.set(msgData.roomId, {
+                    roomId: msgData.roomId,
+                    roomName: msgData.roomName || 'Arena',
+                    hostName: msgData.hostName || 'Player',
+                    gameMode: msgData.gameMode || 'PONG',
+                    status: msgData.status || 'waiting',
+                    targetScore: msgData.targetScore || 11,
+                    playerCount: msgData.playerCount || 1,
+                    createdAt: msgData.timestamp || now
+                  });
+                }
+              } else if (msgData.action === 'ROOM_CLOSED' && msgData.roomId) {
+                globalRoomsMap.delete(msgData.roomId);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // 2. Query fallback /api/presence
+    let localData: any = null;
     try {
       const res = await fetch('/api/presence', { method: 'GET' });
       if (res.ok) {
-        const data = await res.json();
-        this.eventBus.emit('presence:updated', {
-          lookingCount: data.lookingCount || 0,
-          playingCount: data.playingCount || 0,
-          onlineCount: data.onlineCount || 0,
-          pongGamesCount: data.pongGamesCount || 0,
-          curveGamesCount: data.curveGamesCount || 0,
-          rooms: data.rooms || []
-        });
-        return data;
+        localData = await res.json();
+        if (localData.rooms) {
+          for (const r of localData.rooms) {
+            if (!globalRoomsMap.has(r.roomId)) {
+              globalRoomsMap.set(r.roomId, r);
+            }
+          }
+        }
       }
     } catch {}
-    return { lookingCount: 0, playingCount: 0, rooms: [] };
+
+    const combinedRooms = Array.from(globalRoomsMap.values());
+    const lookingCount = (localData?.lookingCount || 0) + (combinedRooms.length > 0 ? combinedRooms.length : 0);
+    const playingCount = localData?.playingCount || (this.isConnected ? 1 : 0);
+
+    const result = {
+      lookingCount,
+      playingCount,
+      onlineCount: Math.max(lookingCount + playingCount, localData?.onlineCount || 1),
+      pongGamesCount: localData?.pongGamesCount || 0,
+      curveGamesCount: localData?.curveGamesCount || 0,
+      rooms: combinedRooms
+    };
+
+    this.eventBus.emit('presence:updated', result);
+    return result;
+  }
+
+  public subscribeToLobbyUpdates(onUpdate: (rooms: any[]) => void): () => void {
+    let ws: WebSocket | null = null;
+    let isDisposed = false;
+
+    try {
+      ws = new WebSocket(GLOBAL_ROOMS_WS);
+      ws.onmessage = (event) => {
+        if (isDisposed) return;
+        try {
+          const ev = JSON.parse(event.data);
+          if (ev.event === 'message' && ev.message) {
+            // Re-fetch latest snapshot on real-time room notification
+            this.fetchLobbyRooms().then(data => {
+              if (!isDisposed && data.rooms) {
+                onUpdate(data.rooms);
+              }
+            });
+          }
+        } catch {}
+      };
+    } catch {}
+
+    return () => {
+      isDisposed = true;
+      if (ws) {
+        try { ws.close(); } catch {}
+        ws = null;
+      }
+    };
   }
 }
 
