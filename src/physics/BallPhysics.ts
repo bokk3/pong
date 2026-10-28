@@ -110,9 +110,12 @@ export class BallPhysics {
           const minVyNeeded = (minHeightAboveTable + 0.5 * PHYSICS_CONSTANTS.GRAVITY * tNet * tNet) / tNet;
           this.velocity.y = Math.max(this.velocity.y, minVyNeeded);
         } else {
-          // Standard minimum bounce velocity
-          if (Math.abs(this.velocity.y) < 1.35) {
-            this.velocity.y = 1.35;
+          // Robust baseline carry: ensure ball bounces high enough and fast enough to clear table edge
+          if (Math.abs(this.velocity.y) < 1.65) {
+            this.velocity.y = 1.65;
+          }
+          if (Math.abs(this.velocity.z) < 3.8 && Math.abs(this.velocity.z) > 0.5) {
+            this.velocity.z = Math.sign(this.velocity.z) * 3.8;
           }
         }
 

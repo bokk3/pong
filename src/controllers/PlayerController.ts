@@ -342,7 +342,7 @@ export class PlayerController {
     }
 
     // If ball is rushing towards player but slightly early, buffer the input
-    if (ballPos.z >= 0.95 && ballPos.z < 1.35 && ballVel.z > 0.8) {
+    if (ballPos.z >= 0.75 && ballPos.z < 1.15 && ballVel.z > 0.6) {
       this.bufferedStrike = {
         spin: preferredSpin,
         power,
@@ -355,9 +355,9 @@ export class PlayerController {
     }
 
     // If ball is within the live strike zone (forgiving reach and depth)
-    if (ballPos.z >= 1.22 && ballPos.z <= 2.45) {
+    if (ballPos.z >= 0.95 && ballPos.z <= 2.50) {
       const dist = paddlePos.distanceTo(ballPos);
-      if (dist <= 1.35) {
+      if (dist <= 1.45) {
         return this.performStrike(preferredSpin, power, forceSmash, manualAngleBias);
       }
     }
@@ -498,14 +498,14 @@ export class PlayerController {
 
     setTimeout(() => {
       this.paddle.swing(true, 'TOPSPIN', 1.0);
-      // Clean serve strike: directs ball to bounce on player's table side around Z ~ 0.95m
-      this.ball.physics.velocity.set(0.06, -1.8, -5.2);
+      // Clean serve strike: directs ball to bounce on player's table side around Z ~ 0.95m and cleanly carry across
+      this.ball.physics.velocity.set(0.06, -1.8, -5.8);
       this.ball.physics.spin.set(10, 0, 0);
 
       this.eventBus.emit('ball:hit', {
         hitter: 'PLAYER',
         rating: 'GOOD',
-        speed: 5.6,
+        speed: 6.1,
         spin: 'TOPSPIN',
         isSmash: false,
         contactPoint: this.ball.physics.position.clone()

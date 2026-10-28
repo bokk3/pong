@@ -225,53 +225,64 @@ export class CurveController {
 
   /**
    * Advanced Curve Bot AI:
-   * 1. Multi-step fan raycasting with pocket volume sampling (detects trapped cavities).
-   * 2. Edge repulsion with corner anti-pinch (never commits into narrow corner traps).
-   * 3. Aggressive tactical cutting-off: steers across opponent's path to starve their space.
-   * 4. Wall-pinning: if opponent is near the edge, cuts inward to box them against the wall.
+   * 1. Kinematic Arc Simulation: accurately tests circular turning paths matching bike speed & turn rate.
+   * 2. Hard Safety-First Gating: tactical aggression strictly forbidden if clearance < 0.85m.
+   * 3. Steering Hysteresis: eliminates 60Hz alternating turn jitters.
+   * 4. Canyon & Trap Avoidance: checks side corridors to prevent getting pinned into dead ends.
+   * 5. Smart Offensive Tactics: cuts across and pins opponent to boundary when safe.
    */
   private computeBotSteering(opponentTrail?: CurveTrail, opponentState?: { x: number; z: number; angle: number; isAlive: boolean }): void {
     const isNovice = this.difficulty === 'novice';
     const isChampion = this.difficulty === 'master';
 
     // Lookahead reach
-    const maxLookahead = isNovice ? 0.9 : isChampion ? 1.4 : 1.15;
+    const maxLookahead = isNovice ? 1.05 : isChampion ? 1.6 : 1.35;
+    const simSteps = 18;
+    const stepDt = (maxLookahead / this.config.speed) / simSteps;
+    const wallMargin = isNovice ? 0.16 : 0.12;
+    const safeRadius = this.config.headRadius * 1.6;
 
-    // Prospective candidate steering commands
-    const candidates: Array<{ dir: -1 | 0 | 1; turnAngle: number; straightBias: number }> = [
-      { dir: 0, turnAngle: 0, straightBias: 0.15 },
-      { dir: -1, turnAngle: -0.4, straightBias: 0 },
-      { dir: 1, turnAngle: 0.4, straightBias: 0 },
-      { dir: -1, turnAngle: -0.85, straightBias: -0.05 },
-      { dir: 1, turnAngle: 0.85, straightBias: -0.05 },
-      { dir: -1, turnAngle: -1.35, straightBias: -0.1 },
-      { dir: 1, turnAngle: 1.35, straightBias: -0.1 }
+    // Prospective kinematic trajectories
+    const candidates: Array<{
+      initialSteer: -1 | 0 | 1;
+      steerDirection: -1 | 0 | 1;
+      turnRatio: number;
+    }> = [
+      { initialSteer: 0, steerDirection: 0, turnRatio: 0 },
+      { initialSteer: -1, steerDirection: -1, turnRatio: 0.35 },
+      { initialSteer: 1, steerDirection: 1, turnRatio: 0.35 },
+      { initialSteer: -1, steerDirection: -1, turnRatio: 0.65 },
+      { initialSteer: 1, steerDirection: 1, turnRatio: 0.65 },
+      { initialSteer: -1, steerDirection: -1, turnRatio: 1.0 },
+      { initialSteer: 1, steerDirection: 1, turnRatio: 1.0 }
     ];
 
     let bestDir: -1 | 0 | 1 = 0;
-    let highestScore = -9999;
+    let highestScore = -99999;
 
-    // Evaluate each prospective turn
+    // Evaluate each kinematic arc
     for (const cand of candidates) {
-      const probeAngle = this.angle + cand.turnAngle;
+      let simX = this.x;
+      let simZ = this.z;
+      let simAngle = this.angle;
       let clearDistance = 0;
       let hitObstacle = false;
-      const steps = 12;
+      const turnStepsCount = Math.round(simSteps * cand.turnRatio);
 
-      for (let s = 1; s <= steps; s++) {
-        const dist = (s / steps) * maxLookahead;
-        const px = this.x + Math.cos(probeAngle) * dist;
-        const pz = this.z + Math.sin(probeAngle) * dist;
+      for (let s = 1; s <= simSteps; s++) {
+        const currentSteer = s <= turnStepsCount ? cand.steerDirection : 0;
+        simAngle += currentSteer * this.config.turnSpeed * stepDt;
+        simX += Math.cos(simAngle) * (this.config.speed * stepDt);
+        simZ += Math.sin(simAngle) * (this.config.speed * stepDt);
 
-        // Wall safety check (with generous margin)
-        const wallMargin = isNovice ? 0.16 : 0.12;
-        if (px <= this.minX + wallMargin || px >= this.maxX - wallMargin || pz <= this.minZ + wallMargin || pz >= this.maxZ - wallMargin) {
+        // Wall safety check
+        if (simX <= this.minX + wallMargin || simX >= this.maxX - wallMargin ||
+            simZ <= this.minZ + wallMargin || simZ >= this.maxZ - wallMargin) {
           hitObstacle = true;
           break;
         }
 
-        const point = { x: px, y: pz };
-        const safeRadius = this.config.headRadius * 1.7;
+        const point = { x: simX, y: simZ };
 
         // Own trail obstacle check
         for (let i = 0; i < this.trail.segments.length; i++) {
@@ -296,69 +307,69 @@ export class CurveController {
           if (hitObstacle) break;
         }
 
-        clearDistance = dist;
+        clearDistance = s * (this.config.speed * stepDt);
       }
 
       if (!hitObstacle) {
         clearDistance = maxLookahead;
       }
 
-      // Base survival score: length of uninterrupted forward flight
-      let score = clearDistance * 4.0 + cand.straightBias;
+      // Base survival score: weighted by clear forward flight
+      let score = clearDistance * 8.0;
 
-      // Heavy penalty for immediate dead ends (< 0.35m ahead)
-      if (clearDistance < 0.35) {
-        score -= 50;
+      // Heavy penalty for imminent obstacles
+      if (clearDistance < 0.40) {
+        score -= 150;
+      } else if (clearDistance < 0.75) {
+        score -= 45;
       }
 
-      // End of probe position
-      const probeEndX = this.x + Math.cos(probeAngle) * clearDistance;
-      const probeEndZ = this.z + Math.sin(probeAngle) * clearDistance;
-
-      // Pocket Area Check: sample left and right wings from probe endpoint
-      // This detects if the bot is driving straight into a narrow canyon/pocket
-      const leftWingX = probeEndX + Math.cos(probeAngle - Math.PI / 2) * 0.25;
-      const leftWingZ = probeEndZ + Math.sin(probeAngle - Math.PI / 2) * 0.25;
-      const rightWingX = probeEndX + Math.cos(probeAngle + Math.PI / 2) * 0.25;
-      const rightWingZ = probeEndZ + Math.sin(probeAngle + Math.PI / 2) * 0.25;
-
-      const isLeftClogged = this.isLocationBlocked(leftWingX, leftWingZ, opponentTrail);
-      const isRightClogged = this.isLocationBlocked(rightWingX, rightWingZ, opponentTrail);
-
-      if (isLeftClogged && isRightClogged) {
-        score -= 25; // Canyon trap penalty!
+      // Steering hysteresis: reward continuing turn direction to eliminate jitter
+      if (cand.initialSteer === this.steering) {
+        score += 0.45;
+      }
+      if (cand.initialSteer === 0) {
+        score += 0.20;
       }
 
-      // Border avoidance bonus: prefer heading towards the open center
-      const distFromCenter = Math.hypot(probeEndX, probeEndZ);
-      const centerBias = (1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 0.8;
+      // Border avoidance bonus: prefer heading towards open arena center
+      const distFromCenter = Math.hypot(simX, simZ);
+      const centerBias = (1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 1.2;
       score += centerBias;
 
-      // --- Offensive Tactics vs Opponent ---
-      if (opponentState && opponentState.isAlive && !isNovice) {
+      // Canyon / Pocket trap check at trajectory endpoint
+      const leftWingX = simX + Math.cos(simAngle - Math.PI / 2) * 0.28;
+      const leftWingZ = simZ + Math.sin(simAngle - Math.PI / 2) * 0.28;
+      const rightWingX = simX + Math.cos(simAngle + Math.PI / 2) * 0.28;
+      const rightWingZ = simZ + Math.sin(simAngle + Math.PI / 2) * 0.28;
+
+      if (this.isLocationBlocked(leftWingX, leftWingZ, opponentTrail) &&
+          this.isLocationBlocked(rightWingX, rightWingZ, opponentTrail)) {
+        score -= 35; // Avoid dead-end canyons
+      }
+
+      // OFFENSIVE TACTICS: ONLY GATED IF SURVIVAL IS COMPLETELY SAFE (clearDistance >= 0.85m)
+      if (clearDistance >= 0.85 && opponentState && opponentState.isAlive && !isNovice) {
         const distToOpp = Math.hypot(opponentState.x - this.x, opponentState.z - this.z);
 
-        // If opponent is within medium engagement distance (~2.2m)
-        if (distToOpp < 2.2) {
+        if (distToOpp < 2.5) {
           // Predict where opponent will be in 0.8s
           const oppPredX = opponentState.x + Math.cos(opponentState.angle) * 1.1;
           const oppPredZ = opponentState.z + Math.sin(opponentState.angle) * 1.1;
 
-          // Distance from this candidate probe end to opponent's future trajectory
-          const distToOppFuture = Math.hypot(oppPredX - probeEndX, oppPredZ - probeEndZ);
+          const distToOppFuture = Math.hypot(oppPredX - simX, oppPredZ - simZ);
 
-          // 1. Cut-off tactic: steer across their path ahead of them
-          if (distToOppFuture < 0.7 && clearDistance > 0.6) {
+          // 1. Cut-off tactic: steer ahead of opponent to choke their corridor
+          if (distToOppFuture < 0.75) {
             score += isChampion ? 3.5 : 2.0;
           }
 
-          // 2. Wall-pinning tactic: if opponent is close to boundary, cut off their escape into center
+          // 2. Wall-pinning tactic: if opponent is near border, cut off escape into center
           const oppDistFromCenter = Math.hypot(opponentState.x, opponentState.z);
-          if (oppDistFromCenter > CURVE_ARENA_HALF * 0.65) {
-            // Opponent is near wall! Check if our trajectory is between opponent and center
-            const botDistToCenter = Math.hypot(probeEndX, probeEndZ);
-            if (botDistToCenter < oppDistFromCenter && distToOpp < 1.4) {
-              score += isChampion ? 4.0 : 2.2; // Box them against the border!
+          if (oppDistFromCenter > CURVE_ARENA_HALF * 0.60) {
+            const botDistToCenter = Math.hypot(simX, simZ);
+            if (botDistToCenter < oppDistFromCenter && distToOpp < 1.6) {
+              score += isChampion ? 4.0 : 2.2;
             }
           }
         }
@@ -366,7 +377,7 @@ export class CurveController {
 
       if (score > highestScore) {
         highestScore = score;
-        bestDir = cand.dir;
+        bestDir = cand.initialSteer;
       }
     }
 

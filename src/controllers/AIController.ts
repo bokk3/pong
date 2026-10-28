@@ -17,6 +17,7 @@ export class AIController {
   private timeSinceBallHit: number = 0;
   private noiseOffset = new THREE.Vector2();
   private hasStruckThisTurn: boolean = false;
+  private hasBouncedOnCpuTable: boolean = false;
 
   constructor(paddle: Paddle, ball: Ball, difficulty: Difficulty = 'pro') {
     this.paddle = paddle;
@@ -28,7 +29,21 @@ export class AIController {
       if (shot.hitter === 'PLAYER') {
         this.timeSinceBallHit = 0;
         this.hasStruckThisTurn = false;
+        this.hasBouncedOnCpuTable = false;
         this.generateNoise();
+      }
+    });
+
+    this.eventBus.on('ball:bounce', (bounce) => {
+      if (bounce.surface === 'cpu_table') {
+        this.hasBouncedOnCpuTable = true;
+      }
+    });
+
+    this.eventBus.on('state:changed', (state) => {
+      if (state.to === 'SERVE_WAIT' || state.to === 'RALLY') {
+        this.hasStruckThisTurn = false;
+        this.hasBouncedOnCpuTable = false;
       }
     });
   }
@@ -62,10 +77,13 @@ export class AIController {
     // Default CPU stance
     let targetX = PADDLE_SPECS.CPU_DEFAULT_POS.x;
     let targetY = PADDLE_SPECS.CPU_DEFAULT_POS.y;
-    const targetZ = PADDLE_SPECS.CPU_DEFAULT_POS.z;
+    let targetZ = PADDLE_SPECS.CPU_DEFAULT_POS.z;
 
-    // Track incoming ball if moving towards CPU (velocity.z < -0.5)
-    if (ballVel.z < -0.5 && this.timeSinceBallHit >= this.reactionDelay) {
+    // Track incoming ball if moving towards CPU (velocity.z < -0.3)
+    if (ballVel.z < -0.3 && this.timeSinceBallHit >= this.reactionDelay) {
+      // Step paddle forward if ball is shallow or landing inside table
+      targetZ = THREE.MathUtils.clamp(ballPos.z - 0.30, -2.10, -1.55);
+
       const pred = TrajectoryPredictor.predictLanding(
         ballPos,
         ballVel,
@@ -84,10 +102,12 @@ export class AIController {
         PADDLE_SPECS.MAX_Y
       );
 
-      // Check if ball is in strike zone (forgiving reach for smooth rallies)
-      if (!this.hasStruckThisTurn && ballPos.z <= -1.35 && ballPos.z >= -2.35) {
+      // Check if ball is in strike zone
+      // AI can strike once ball has bounced on CPU table (at z <= -0.85) or crossed baseline (z <= -1.35)
+      const canStrike = (this.hasBouncedOnCpuTable && ballPos.z <= -0.85) || ballPos.z <= -1.35;
+      if (!this.hasStruckThisTurn && canStrike && ballPos.z >= -2.45) {
         const dist = this.paddle.position.distanceTo(ballPos);
-        if (dist < 0.95) {
+        if (dist < 1.25) {
           this.executeAIStrike();
           this.hasStruckThisTurn = true;
         }
@@ -194,14 +214,14 @@ export class AIController {
 
     setTimeout(() => {
       this.paddle.swing(true, 'TOPSPIN', 1.0);
-      // Clean serve strike: directs ball to bounce on CPU side around Z ~ -0.95m
-      this.ball.physics.velocity.set(-0.06, -1.8, 5.2);
+      // Clean serve strike: directs ball to bounce on CPU side around Z ~ -0.95m and cleanly carry across
+      this.ball.physics.velocity.set(-0.06, -1.8, 5.8);
       this.ball.physics.spin.set(-10, 0, 0);
 
       this.eventBus.emit('ball:hit', {
         hitter: 'CPU',
         rating: 'GOOD',
-        speed: 5.6,
+        speed: 6.1,
         spin: 'TOPSPIN',
         isSmash: false,
         contactPoint: this.ball.physics.position.clone()

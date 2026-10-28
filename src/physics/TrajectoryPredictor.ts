@@ -45,12 +45,30 @@ export class TrajectoryPredictor {
       pos.addScaledVector(vel, dt);
       time += dt;
 
-      // Check table bounce
-      if (prevY >= tableTop && pos.y <= tableTop && !tableBouncePos) {
+      // Check table bounce (supports multi-bounce during serves and deep rallies)
+      if (prevY >= tableTop && pos.y <= tableTop) {
         if (Math.abs(pos.x) <= TABLE_BOUNDS.halfWidth && Math.abs(pos.z) <= TABLE_BOUNDS.halfLength) {
-          tableBouncePos = pos.clone();
-          vel.y = -vel.y * PHYSICS_CONSTANTS.TABLE_RESTITUTION_Y;
+          if (!tableBouncePos) {
+            tableBouncePos = pos.clone();
+          }
+          pos.y = tableTop;
+          vel.y = Math.abs(vel.y) * PHYSICS_CONSTANTS.TABLE_RESTITUTION_Y;
+          const headingToNet = (pos.z > 0 && vel.z < 0) || (pos.z < 0 && vel.z > 0);
+          if (!headingToNet) {
+            vel.y = Math.max(vel.y, 1.65);
+            if (Math.abs(vel.z) < 3.8 && Math.abs(vel.z) > 0.5) {
+              vel.z = Math.sign(vel.z) * 3.8;
+            }
+          }
+          vel.x *= PHYSICS_CONSTANTS.TABLE_FRICTION_XZ;
+          vel.z *= PHYSICS_CONSTANTS.TABLE_FRICTION_XZ;
         }
+      }
+
+      // Check floor bounce to prevent negative plunging
+      if (prevY >= 0.05 && pos.y <= 0.05) {
+        pos.y = 0.05;
+        vel.y = Math.abs(vel.y) * PHYSICS_CONSTANTS.FLOOR_RESTITUTION_Y;
       }
 
       // Check crossing target Z
