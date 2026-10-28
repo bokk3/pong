@@ -525,7 +525,7 @@ export class NetworkManager {
     try {
       await fetch(GLOBAL_ROOMS_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(data)
       });
     } catch {}
@@ -543,9 +543,9 @@ export class NetworkManager {
     const globalRoomsMap = new Map<string, any>();
     const now = Date.now();
 
-    // 1. Query global relay (last 20 seconds)
+    // 1. Query global relay (last 30 seconds)
     try {
-      const res = await fetch(`${GLOBAL_ROOMS_ENDPOINT}/json?poll=1&since=20s`, { cache: 'no-store' });
+      const res = await fetch(`${GLOBAL_ROOMS_ENDPOINT}/json?poll=1&since=30s`, { cache: 'no-store' });
       if (res.ok) {
         const text = await res.text();
         const lines = text.trim().split('\n');
@@ -554,10 +554,19 @@ export class NetworkManager {
           try {
             const ev = JSON.parse(line);
             if (ev.event === 'message' && ev.message) {
-              const msgData = JSON.parse(ev.message);
-              if (msgData.action === 'ROOM_ANNOUNCE' && msgData.roomId) {
-                // Heartbeat must be within 25 seconds
-                if (now - (msgData.timestamp || 0) < 25000) {
+              let msgData: any = null;
+              if (typeof ev.message === 'string') {
+                try {
+                  msgData = JSON.parse(ev.message);
+                } catch {}
+              } else if (typeof ev.message === 'object') {
+                msgData = ev.message;
+              }
+
+              if (msgData && msgData.action === 'ROOM_ANNOUNCE' && msgData.roomId) {
+                // Heartbeat must be within 35 seconds (server time ev.time or client timestamp)
+                const msgAge = ev.time ? (now - ev.time * 1000) : (now - (msgData.timestamp || 0));
+                if (msgAge < 35000) {
                   globalRoomsMap.set(msgData.roomId, {
                     roomId: msgData.roomId,
                     roomName: msgData.roomName || 'Arena',
@@ -569,7 +578,7 @@ export class NetworkManager {
                     createdAt: msgData.timestamp || now
                   });
                 }
-              } else if (msgData.action === 'ROOM_CLOSED' && msgData.roomId) {
+              } else if (msgData && msgData.action === 'ROOM_CLOSED' && msgData.roomId) {
                 globalRoomsMap.delete(msgData.roomId);
               }
             }

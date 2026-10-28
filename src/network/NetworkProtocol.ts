@@ -4,6 +4,7 @@ export type NetworkMessageType =
   | 'HANDSHAKE'
   | 'PADDLE_MOVE'
   | 'BALL_HIT'
+  | 'BALL_SYNC'
   | 'SERVE_START'
   | 'SCORE_SYNC'
   | 'POINT_SCORED'
@@ -108,10 +109,19 @@ export interface CurveScoreSyncMessage {
   cpu: number;
 }
 
+export interface BallSyncMessage {
+  type: 'BALL_SYNC';
+  position: [number, number, number];
+  velocity: [number, number, number];
+  spin: [number, number, number];
+  isActive: boolean;
+}
+
 export type NetworkMessage =
   | HandshakeMessage
   | PaddleMoveMessage
   | BallHitMessage
+  | BallSyncMessage
   | ServeStartMessage
   | ScoreSyncMessage
   | PointScoredMessage

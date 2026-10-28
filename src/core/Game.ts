@@ -53,6 +53,7 @@ export class Game {
 
   private timeScale: number = 1.0;
   private freezeFrames: number = 0;
+  private ballSyncTimer: number = 0;
   private isRunning: boolean = false;
   private isPaused: boolean = false;
 
@@ -541,6 +542,40 @@ export class Game {
       return;
     }
 
+    if (msg.type === 'BALL_SYNC') {
+      if (this.network.role === 'CLIENT') {
+        const invX = -msg.position[0];
+        const invY = msg.position[1];
+        const invZ = -msg.position[2];
+
+        const invVx = -msg.velocity[0];
+        const invVy = msg.velocity[1];
+        const invVz = -msg.velocity[2];
+
+        const invSx = -msg.spin[0];
+        const invSy = -msg.spin[1];
+        const invSz = -msg.spin[2];
+
+        if (msg.isActive) {
+          this.ball.physics.isActive = true;
+          // Smooth correction: if deviation is more than 6cm, lerp toward host position
+          const dx = this.ball.physics.position.x - invX;
+          const dy = this.ball.physics.position.y - invY;
+          const dz = this.ball.physics.position.z - invZ;
+          const distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq > 0.0036) {
+            this.ball.physics.position.lerp(new THREE.Vector3(invX, invY, invZ), 0.6);
+          }
+          this.ball.physics.velocity.set(invVx, invVy, invVz);
+          this.ball.physics.spin.set(invSx, invSy, invSz);
+        } else {
+          this.ball.physics.isActive = false;
+          this.ball.physics.position.set(invX, invY, invZ);
+        }
+      }
+      return;
+    }
+
     if (msg.type === 'POINT_SCORED') {
       if (this.network.role === 'CLIENT') {
         const localWinner: PlayerId = msg.winner === 'PLAYER' ? 'CPU' : 'PLAYER';
@@ -654,6 +689,22 @@ export class Game {
         this.remotePlayerCtrl.update(dt);
       }
       this.ball.update(dt);
+
+      // Real-time authoritative ball streaming from HOST to CLIENT in multiplayer Pong
+      if (this.mode === 'MULTIPLAYER' && this.network.role === 'HOST' && this.network.isConnected) {
+        this.ballSyncTimer += rawDelta;
+        if (this.ballSyncTimer >= 0.033) { // 30Hz sync
+          this.ballSyncTimer = 0;
+          this.network.send({
+            type: 'BALL_SYNC',
+            position: [this.ball.physics.position.x, this.ball.physics.position.y, this.ball.physics.position.z],
+            velocity: [this.ball.physics.velocity.x, this.ball.physics.velocity.y, this.ball.physics.velocity.z],
+            spin: [this.ball.physics.spin.x, this.ball.physics.spin.y, this.ball.physics.spin.z],
+            isActive: this.ball.physics.isActive
+          });
+        }
+      }
+
       this.stadium.update(dt, this.ball.physics.position);
       this.vfx.update(dt);
       this.vfx.updateTrail(
