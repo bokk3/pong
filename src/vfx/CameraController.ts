@@ -19,6 +19,8 @@ export class CameraController {
   private currentFov: number = 55;
   private targetFov: number = 55;
   private currentMode: 'PONG' | 'CURVE' = 'PONG';
+  /** Curve arena edge length; the top-down camera height scales with it. */
+  private curveArenaSize: number = 4.8;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(this.defaultFov, aspect, 0.1, 100);
@@ -32,22 +34,27 @@ export class CameraController {
     this.setAspect(this.camera.aspect);
   }
 
+  public setCurveArenaSize(size: number): void {
+    this.curveArenaSize = size;
+    if (this.currentMode === 'CURVE') this.setAspect(this.camera.aspect);
+  }
+
   public setAspect(aspect: number): void {
     this.camera.aspect = aspect;
 
     if (this.currentMode === 'CURVE') {
-      // Classic 2D Top-Down perspective directly above the enlarged 4.8m square arena
+      // Top-down view framing the whole arena; heights were tuned for the 4.8m arena and scale with size
+      const scale = this.curveArenaSize / 4.8;
       if (aspect < 1.0) {
-        // Portrait mobile: height scaled to fit 4.8m width
+        // Portrait: fit the arena's width to the narrow screen
         this.defaultFov = 52;
-        this.basePosition.set(0, 6.2 / aspect, 0);
-        this.baseLookAt.set(0, 0, 0);
+        this.basePosition.set(0, (6.9 * scale) / aspect, 0);
       } else {
-        // Landscape desktop: true top-down perpendicular view comfortably framing 4.8m
         this.defaultFov = 50;
-        this.basePosition.set(0, 5.8, 0);
-        this.baseLookAt.set(0, 0, 0);
+        // A little extra height so the scoreboard and hint bar don't cover the arena edges
+        this.basePosition.set(0, 6.6 * scale, 0);
       }
+      this.baseLookAt.set(0, 0, 0);
     } else {
 
       if (aspect < 1.0) {

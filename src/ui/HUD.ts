@@ -3,6 +3,7 @@ import { EventBus } from '../core/EventBus';
 import { NetworkManager } from '../network/NetworkManager';
 import { DeviceDetector } from '../utils/DeviceDetector';
 import { TiltController } from '../controllers/TiltController';
+import { ArenaSize, CurveArenaSettings, DEFAULT_ARENA_SETTINGS, describeArena, sanitizeArenaSettings } from '../core/CurveArena';
 
 export class HUD {
   private eventBus: EventBus;
@@ -150,6 +151,9 @@ export class HUD {
   public onToggleWebcam: (() => void) | null = null;
   public onPauseRequest: (() => void) | null = null;
   public onToggleTilt: (() => void) | null = null;
+
+  /** Curve Battle arena for bot matches and for matches this player hosts. */
+  public curveSettings: CurveArenaSettings = { ...DEFAULT_ARENA_SETTINGS };
 
   private tiltToggleBtns: HTMLElement[] = [];
   private tiltActive: boolean = false;
@@ -303,6 +307,7 @@ export class HUD {
         curveBtn.classList.remove('active');
         this.selectedGameMode = 'PONG';
         if (diffBox) diffBox.style.display = 'flex';
+        this.updateArenaPickerVisibility();
         this.updateControlsHint();
         if (this.onGameModeSelect) this.onGameModeSelect('PONG');
       });
@@ -312,10 +317,25 @@ export class HUD {
         pongBtn.classList.remove('active');
         this.selectedGameMode = 'CURVE';
         if (diffBox) diffBox.style.display = 'flex'; // Allow choosing Novice, Pro, or Champion bot
+        this.updateArenaPickerVisibility();
         this.updateControlsHint();
         if (this.onGameModeSelect) this.onGameModeSelect('CURVE');
       });
     }
+
+    // Curve arena settings (size / obstacles / portals): every copy of the controls stays in sync
+    document.querySelectorAll<HTMLButtonElement>('[data-arena-size]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.setCurveSettings({ ...this.curveSettings, size: btn.dataset.arenaSize as ArenaSize });
+      });
+    });
+    document.querySelectorAll<HTMLButtonElement>('[data-arena-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.arenaToggle === 'portals' ? 'portals' : 'obstacles';
+        this.setCurveSettings({ ...this.curveSettings, [key]: !this.curveSettings[key] });
+      });
+    });
+    this.setCurveSettings(this.loadCurveSettings(), false);
 
 
     // Touch Steering Zones
@@ -488,6 +508,8 @@ export class HUD {
         this.createModeCurveBtn!.classList.remove('active');
         this.currentCreateMode = 'PONG';
         if (this.createRoomScoreSelect) this.createRoomScoreSelect.value = '11';
+        const arenaField = document.getElementById('create-arena-field');
+        if (arenaField) arenaField.hidden = true;
       });
 
       this.createModeCurveBtn.addEventListener('click', () => {
@@ -495,6 +517,8 @@ export class HUD {
         this.createModePongBtn!.classList.remove('active');
         this.currentCreateMode = 'CURVE';
         if (this.createRoomScoreSelect) this.createRoomScoreSelect.value = '5';
+        const arenaField = document.getElementById('create-arena-field');
+        if (arenaField) arenaField.hidden = false;
       });
     }
 
@@ -898,6 +922,8 @@ export class HUD {
 
   private async startQuickMatchmaking(): Promise<void> {
     const session = ++this.matchmakingSession;
+    // If we end up hosting, our arena settings apply; joining someone else's room uses theirs
+    this.network.hostedCurveSettings = { ...this.curveSettings };
     this.isStartingMatch = false;
     this.mmPingValEl.textContent = '-- ms';
     const modeLabel = this.selectedGameMode === 'CURVE' ? 'Curve Battle' : 'Classic Pong';
@@ -921,6 +947,7 @@ export class HUD {
     // A private room hosts whichever mode is selected in the main menu
     this.network.activeGameMode = this.selectedGameMode;
     this.network.hostedTargetScore = this.selectedGameMode === 'CURVE' ? 5 : 11;
+    this.network.hostedCurveSettings = { ...this.curveSettings };
     try {
       const code = await this.network.initPeer();
       this.displayRoomCodeEl.textContent = code.toUpperCase();
@@ -981,6 +1008,46 @@ export class HUD {
     const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
     const noun = nouns[Math.floor(Math.random() * nouns.length)];
     return `${adj}${noun}`;
+  }
+
+  // --- Curve arena settings ---
+  private loadCurveSettings(): CurveArenaSettings {
+    try {
+      const raw = localStorage.getItem('spinpong_curve_arena');
+      return raw ? sanitizeArenaSettings(JSON.parse(raw)) : { ...DEFAULT_ARENA_SETTINGS };
+    } catch {
+      return { ...DEFAULT_ARENA_SETTINGS };
+    }
+  }
+
+  private setCurveSettings(settings: CurveArenaSettings, save: boolean = true): void {
+    this.curveSettings = sanitizeArenaSettings(settings);
+    // Matches this player hosts use these settings (a joining client adopts the host's in the handshake)
+    if (!this.network.isConnected) {
+      this.network.hostedCurveSettings = { ...this.curveSettings };
+    }
+    document.querySelectorAll<HTMLElement>('[data-arena-size]').forEach(btn => {
+      const on = btn.dataset.arenaSize === this.curveSettings.size;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-checked', String(on));
+    });
+    document.querySelectorAll<HTMLElement>('[data-arena-toggle]').forEach(btn => {
+      const on = btn.dataset.arenaToggle === 'portals' ? this.curveSettings.portals : this.curveSettings.obstacles;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', String(on));
+    });
+    if (save) {
+      try {
+        localStorage.setItem('spinpong_curve_arena', JSON.stringify(this.curveSettings));
+      } catch {
+        // storage unavailable
+      }
+    }
+  }
+
+  private updateArenaPickerVisibility(): void {
+    const box = document.getElementById('arena-picker-box');
+    if (box) box.hidden = this.selectedGameMode !== 'CURVE';
   }
 
   private canNativeShare(): boolean {
@@ -1366,7 +1433,8 @@ export class HUD {
 
       return `
         <tr data-room-id="${safeRoomId}" data-room-mode="${room.gameMode}">
-          <td><strong style="color: #fff;">${safeRoomName}</strong></td>
+          <td><strong style="color: #fff;">${safeRoomName}</strong>${room.gameMode === 'CURVE' && room.curveArena
+            ? `<div class="lobby-room-sub">${escapeHtml(describeArena(room.curveArena))}</div>` : ''}</td>
           <td>${modeBadge}</td>
           <td>${safeHostName}</td>
           <td>First to ${room.targetScore}</td>
@@ -1435,6 +1503,7 @@ export class HUD {
       this.onGameModeSelect(mode);
     }
 
+    this.network.hostedCurveSettings = { ...this.curveSettings };
     const code = await this.network.createLobbyRoom(mode, rawName, scoreVal);
 
     if (this.lobbyCreatePanelEl) {

@@ -5,6 +5,10 @@ import { EventBus } from './EventBus';
 import { NetworkManager } from '../network/NetworkManager';
 import { CurveCrashMessage, CurveInputMessage, CurveRoundStartMessage, NetworkMessage } from '../network/NetworkProtocol';
 import { SoundEngine } from '../audio/SoundEngine';
+import {
+  ArenaLayout, CurveArena, CurveArenaSettings, DEFAULT_ARENA_SETTINGS, SpawnPoint,
+  generateLayout, generateSpawns, sanitizeLayout
+} from './CurveArena';
 
 export type CurveRoundState = 'COUNTDOWN' | 'PLAYING' | 'ROUND_OVER' | 'MATCH_OVER';
 
@@ -23,6 +27,9 @@ export class CurveGameMode {
   public countdownTimer: number = 3.0;
   public score: CurveScore = { player: 0, cpu: 0, targetScore: 5 };
 
+  public arena: CurveArena;
+  private settings: CurveArenaSettings = DEFAULT_ARENA_SETTINGS;
+  private lastRoundStart: { msg: CurveRoundStartMessage; at: number } | null = null;
   private netSyncTimer: number = 0;
   private roundOverDelay: number = 0;
 
@@ -36,7 +43,12 @@ export class CurveGameMode {
     this.p1 = new CurveController('PLAYER', 0x00f3ff, false);
     this.p2 = new CurveController('CPU', 0xff3b30, true);
 
-    this.buildSquareArena();
+    this.arena = new CurveArena();
+    this.group.add(this.arena.group);
+    for (const curve of [this.p1, this.p2]) {
+      curve.arena = this.arena;
+      curve.onTeleport = () => this.sound.playSwoosh(0.9);
+    }
 
     this.group.add(this.p1.trail.group);
     this.group.add(this.p1.headMesh);
@@ -44,51 +56,10 @@ export class CurveGameMode {
     this.group.add(this.p2.headMesh);
   }
 
-  private buildSquareArena(): void {
-    const size = 4.8; // Expanded square canvas
-    const half = size / 2;
-
-    // 1. Dark, crisp matte arena floor (elevated cleanly above any court elements)
-    const floorGeo = new THREE.PlaneGeometry(size, size);
-    const floorMat = new THREE.MeshBasicMaterial({
-      color: 0x070c18, // Deep dark retro navy
-      side: THREE.FrontSide
-    });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0.04, 0);
-    this.group.add(floor);
-
-    // 2. Subtle grid lines on the square arena
-    const gridHelper = new THREE.GridHelper(size, 20, 0x1e293b, 0x0f172a);
-    gridHelper.position.y = 0.042;
-    this.group.add(gridHelper);
-
-    // 3. Glowing outer boundary walls (arena border)
-    const borderMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    const wallThick = 0.025;
-    const wallHeight = 0.06;
-    const wallY = 0.04 + wallHeight / 2;
-
-    // Top wall (+Z)
-    const wallTop = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
-    wallTop.position.set(0, wallY, half + wallThick / 2);
-    this.group.add(wallTop);
-
-    // Bottom wall (-Z)
-    const wallBottom = new THREE.Mesh(new THREE.BoxGeometry(size + wallThick * 2, wallHeight, wallThick), borderMat);
-    wallBottom.position.set(0, wallY, -half - wallThick / 2);
-    this.group.add(wallBottom);
-
-    // Left wall (-X)
-    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
-    wallLeft.position.set(-half - wallThick / 2, wallY, 0);
-    this.group.add(wallLeft);
-
-    // Right wall (+X)
-    const wallRight = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, size), borderMat);
-    wallRight.position.set(half + wallThick / 2, wallY, 0);
-    this.group.add(wallRight);
+  /** Applies a round's arena (size, obstacles, portals) and tells the camera to re-frame. */
+  private applyLayout(layout: ArenaLayout): void {
+    this.arena.setLayout(layout);
+    this.eventBus.emit('curve:arena', { size: this.arena.size });
   }
 
   /**
@@ -110,8 +81,14 @@ export class CurveGameMode {
     return { player: this.score.cpu, cpu: this.score.player, targetScore: this.score.targetScore };
   }
 
-  public startMatch(isMultiplayer: boolean, difficulty: 'novice' | 'pro' | 'master' = 'pro', targetScore: number = 5): void {
+  public startMatch(
+    isMultiplayer: boolean,
+    difficulty: 'novice' | 'pro' | 'master' = 'pro',
+    targetScore: number = 5,
+    settings: CurveArenaSettings = DEFAULT_ARENA_SETTINGS
+  ): void {
     this.isMultiplayer = isMultiplayer;
+    this.settings = settings;
     this.score = { player: 0, cpu: 0, targetScore: Math.max(1, targetScore) };
     this.roundNumber = 1;
     this.roundState = 'COUNTDOWN';
@@ -120,93 +97,83 @@ export class CurveGameMode {
     this.p1.isRemote = isMultiplayer && this.network.role === 'CLIENT';
     this.p2.isRemote = isMultiplayer && this.network.role === 'HOST';
 
+    // Show the right arena size straight away (the client gets the real layout with round 1)
+    this.applyLayout({ size: settings.size, obstacles: [], portals: [] });
     this.eventBus.emit('curve:score', this.localScore());
 
     if (this.isMultiplayer) {
       if (this.network.role === 'HOST') {
         this.initRoundAsHost();
+      } else if (this.lastRoundStart && performance.now() - this.lastRoundStart.at < 3000) {
+        // The host's first round can arrive a moment before our own match setup runs; don't lose it
+        this.applyRoundStart(this.lastRoundStart.msg);
       }
     } else {
       this.initLocalRound();
     }
   }
 
-  public initLocalRound(): void {
+  /** New spawns + a fresh obstacle/portal layout for the next round. */
+  private setupRound(): { spawns: [SpawnPoint, SpawnPoint]; layout: ArenaLayout } {
     this.roundState = 'COUNTDOWN';
     this.countdownTimer = 2.4;
+    const spawns = generateSpawns(this.settings.size);
+    const layout = generateLayout(this.settings, spawns);
+    this.applyLayout(layout);
+    this.p1.reset(spawns[0].x, spawns[0].z, spawns[0].angle);
+    this.p2.reset(spawns[1].x, spawns[1].z, spawns[1].angle);
+    return { spawns, layout };
+  }
 
-    // Round spawn:
-    // Random positions comfortably inside the 4.8m square (between -1.6 and 1.6), pointing in random directions
-    const span = 3.0; // 3m span inside 4.8m square
-    const p1X = (Math.random() - 0.5) * span;
-    const p1Z = (Math.random() - 0.5) * span;
-    const p1Angle = Math.random() * Math.PI * 2;
-
-    let p2X = (Math.random() - 0.5) * span;
-    let p2Z = (Math.random() - 0.5) * span;
-    // Ensure players don't spawn right on top of each other
-    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 1.1) {
-      p2X = (Math.random() - 0.5) * span;
-      p2Z = (Math.random() - 0.5) * span;
-    }
-    const p2Angle = Math.random() * Math.PI * 2;
-
-    this.p1.reset(p1X, p1Z, p1Angle);
-    this.p2.reset(p2X, p2Z, p2Angle);
-
+  public initLocalRound(): void {
+    this.setupRound();
     this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
   }
 
   public initRoundAsHost(): void {
-    this.roundState = 'COUNTDOWN';
-    this.countdownTimer = 2.4;
-
-    const span = 3.0;
-    const p1X = (Math.random() - 0.5) * span;
-    const p1Z = (Math.random() - 0.5) * span;
-    const p1Angle = Math.random() * Math.PI * 2;
-
-    let p2X = (Math.random() - 0.5) * span;
-    let p2Z = (Math.random() - 0.5) * span;
-    while (Math.hypot(p2X - p1X, p2Z - p1Z) < 1.1) {
-      p2X = (Math.random() - 0.5) * span;
-      p2Z = (Math.random() - 0.5) * span;
-    }
-    const p2Angle = Math.random() * Math.PI * 2;
-
-    this.p1.reset(p1X, p1Z, p1Angle);
-    this.p2.reset(p2X, p2Z, p2Angle);
+    const { spawns, layout } = this.setupRound();
 
     const startMsg: CurveRoundStartMessage = {
       type: 'CURVE_ROUND_START',
       roundNumber: this.roundNumber,
-      p1Spawn: { x: p1X, z: p1Z, angle: p1Angle },
-      p2Spawn: { x: p2X, z: p2Z, angle: p2Angle },
-      countdownMs: 2400
+      p1Spawn: spawns[0],
+      p2Spawn: spawns[1],
+      countdownMs: 2400,
+      layout
     };
     this.network.send(startMsg);
 
     this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
   }
 
+  /** Client: start a round exactly as the host laid it out. */
+  private applyRoundStart(msg: CurveRoundStartMessage): void {
+    this.roundNumber = msg.roundNumber;
+    this.roundState = 'COUNTDOWN';
+    this.countdownTimer = msg.countdownMs / 1000;
 
+    // Note: for CLIENT, local player controls p2 or remote mirrors p1
+    // When CLIENT receives host's p1Spawn & p2Spawn:
+    // P1 is remote (HOST), P2 is local (CLIENT)
+    const layout = sanitizeLayout(msg.layout);
+    if (layout) this.applyLayout(layout);
+    this.p1.reset(msg.p1Spawn.x, msg.p1Spawn.z, msg.p1Spawn.angle);
+    this.p2.reset(msg.p2Spawn.x, msg.p2Spawn.z, msg.p2Spawn.angle);
+
+    this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
+  }
 
   public handleNetworkMessage(msg: NetworkMessage): void {
     if (msg.type === 'CURVE_ROUND_START') {
-      this.roundNumber = msg.roundNumber;
-      this.roundState = 'COUNTDOWN';
-      this.countdownTimer = msg.countdownMs / 1000;
-
-      // Note: for CLIENT, local player controls p2 or remote mirrors p1
-      // When CLIENT receives host's p1Spawn & p2Spawn:
-      // P1 is remote (HOST), P2 is local (CLIENT)
-      this.p1.reset(msg.p1Spawn.x, msg.p1Spawn.z, msg.p1Spawn.angle);
-      this.p2.reset(msg.p2Spawn.x, msg.p2Spawn.z, msg.p2Spawn.angle);
-
-      this.eventBus.emit('curve:round_start', { roundNumber: this.roundNumber });
+      this.lastRoundStart = { msg, at: performance.now() };
+      this.applyRoundStart(msg);
     } else if (msg.type === 'CURVE_INPUT') {
       // Remote player updated position & heading
       const target = this.network.role === 'HOST' ? this.p2 : this.p1;
+      // A big jump means the other player went through a portal: don't draw a line across the arena
+      if (Math.hypot(msg.x - target.x, msg.z - target.z) > 0.35) {
+        target.trail.breakLine();
+      }
       target.x = msg.x;
       target.z = msg.z;
       target.angle = msg.angle;
@@ -238,6 +205,7 @@ export class CurveGameMode {
   }
 
   public update(dt: number): void {
+    this.arena.update(dt);
     if (this.roundState === 'COUNTDOWN') {
       this.countdownTimer -= dt;
       if (this.countdownTimer <= 0) {

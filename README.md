@@ -13,7 +13,7 @@
 | Mode | What it is |
 |---|---|
 | **Classic Pong** | 3D table tennis on a regulation-size table. Serve rules, double-bounce faults, deuce and serve rotation are all enforced. Games go to 11 by default (5 or 21 in custom rooms), and you must win by 2. |
-| **Curve Battle** | Top-down survival duel. Steer a line that leaves a solid trail behind it, slip through the gaps that open in trails, and box your opponent in. First to 5 rounds by default. |
+| **Curve Battle** | Top-down survival duel. Steer a line that leaves a solid trail behind it, slip through the gaps that open in trails, and box your opponent in. First to 5 rounds by default. Pick the **arena size** (Small / Medium / Large) and switch on **obstacles** (pillars and walls) and **portals** (linked pairs that teleport you, heading kept). Layouts are new every round; online, the host's settings apply. |
 
 Both modes can be played against the bot (**Novice / Pro / Champion**) or online against another person.
 

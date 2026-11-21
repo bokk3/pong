@@ -54,6 +54,11 @@ export class CurveTrail {
     posAttr.needsUpdate = true;
   }
 
+  /** Ends the current line so the next point starts a new one (portal jumps, network position snaps). */
+  public breakLine(): void {
+    this.lastPoint = null;
+  }
+
   public addPoint(x: number, z: number, isDrawing: boolean, currentTime: number): void {
     const currentPoint = new THREE.Vector2(x, z);
 

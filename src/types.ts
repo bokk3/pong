@@ -26,6 +26,8 @@ export interface LobbyRoom {
   playerCount: number;
   createdAt: number;
   isQuickMatch: boolean;
+  /** Curve rooms only: arena size / obstacles / portals. */
+  curveArena?: { size: 'S' | 'M' | 'L'; obstacles: boolean; portals: boolean };
 }
 
 export interface LobbyStats {
@@ -139,6 +141,7 @@ export type GameEvents = {
   'curve:score': CurveScore;
   'curve:crash': { victim: PlayerId; x: number; z: number };
   'curve:round_start': { roundNumber: number };
+  'curve:arena': { size: number };
   'curve:match_over': { winner: PlayerId; score: CurveScore };
 };
 

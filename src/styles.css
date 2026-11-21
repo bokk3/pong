@@ -3026,7 +3026,7 @@ html {
   }
 
   .menu-hero-header { grid-area: header; flex-direction: row; justify-content: space-between; gap: 10px; }
-  .menu-section-block:not(.difficulty-picker) { grid-area: mode; }
+  .menu-section-block.mode-picker { grid-area: mode; }
   .difficulty-picker { grid-area: diff; }
   .menu-bottom-bar { grid-area: bar; align-self: start; padding-top: 0; border-top: none; }
 
@@ -3481,5 +3481,188 @@ html {
 
   .hint-item {
     white-space: nowrap;
+  }
+}
+
+/* ==========================================================================
+   CURVE ARENA SETTINGS (size / obstacles / portals)
+   ========================================================================== */
+
+.arena-picker[hidden],
+#create-arena-field[hidden] {
+  display: none !important;
+}
+
+.arena-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arena-size-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+}
+
+.arena-seg-btn {
+  min-height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #94a3b8;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.arena-seg-btn:hover {
+  color: #e2e8f0;
+}
+
+.arena-seg-btn.active {
+  background: linear-gradient(135deg, rgba(0, 153, 255, 0.35), rgba(0, 210, 255, 0.45));
+  color: #fff;
+  box-shadow: 0 0 12px rgba(0, 210, 255, 0.3);
+}
+
+.arena-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.arena-toggle-chip {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.arena-toggle-chip.active {
+  border-color: #fdba74;
+  background: rgba(255, 120, 40, 0.16);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(255, 120, 40, 0.25);
+}
+
+.arena-toggle-chip[data-arena-toggle="portals"].active {
+  border-color: #c084fc;
+  background: rgba(168, 85, 247, 0.18);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.3);
+}
+
+@media (hover: none) {
+  .arena-seg-btn:active,
+  .arena-toggle-chip:active {
+    transform: scale(0.97);
+  }
+}
+
+.lobby-room-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+/* Desktop: size switch and toggles side by side */
+@media (min-width: 961px) {
+  .arena-picker .arena-options {
+    flex-direction: row;
+  }
+
+  .arena-picker .arena-size-buttons {
+    flex: 1.3;
+  }
+
+  .arena-picker .arena-toggles {
+    flex: 1;
+  }
+
+  .arena-picker .arena-toggle-chip {
+    min-height: 48px;
+  }
+}
+
+/* Phone portrait: size + toggles on one compact row to keep the menu short */
+@media (max-width: 600px) and (orientation: portrait), (max-width: 480px) {
+  .arena-options {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 8px;
+  }
+
+  .arena-toggles {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .arena-seg-btn {
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  .arena-size-buttons {
+    align-content: center;
+  }
+
+  .arena-toggle-chip {
+    min-height: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+
+/* Phone landscape: arena row joins the left column of the two-column menu */
+@media (orientation: landscape) and (max-height: 520px) {
+  #main-menu .menu-card {
+    grid-template-rows: auto auto auto auto 1fr;
+    grid-template-areas:
+      "header actions"
+      "mode   actions"
+      "diff   actions"
+      "arena  actions"
+      "bar    actions";
+  }
+
+  .menu-section-block.mode-picker { grid-area: mode; }
+  .arena-picker { grid-area: arena; }
+
+  .arena-options {
+    flex-direction: row;
+  }
+
+  .arena-size-buttons {
+    flex: 1.4;
+    padding: 3px;
+  }
+
+  .arena-seg-btn {
+    min-height: 36px;
+  }
+
+  .arena-toggles {
+    flex: 1;
+    gap: 6px;
+  }
+
+  .arena-toggle-chip {
+    min-height: 0;
+    font-size: 11px;
+    padding: 4px;
   }
 }

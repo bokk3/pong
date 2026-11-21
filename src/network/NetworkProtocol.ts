@@ -1,10 +1,11 @@
 import { MatchScore, PlayerId, ShotRating, SpinType } from '../types';
+import type { ArenaLayout, CurveArenaSettings } from '../core/CurveArena';
 
 /**
  * Bump whenever packet shapes or game-flow semantics change. Peers with a different version refuse to
  * play each other (e.g. an old cached tab connecting to a freshly deployed one).
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export type NetworkMessageType =
   | 'HANDSHAKE'
@@ -27,6 +28,8 @@ export interface HandshakeMessage {
   targetScore?: number;
   role?: 'HOST' | 'CLIENT';
   protocolVersion?: number;
+  /** Host's Curve Battle arena settings (size / obstacles / portals). */
+  curveArena?: CurveArenaSettings;
 }
 
 export interface PaddleMoveMessage {
@@ -88,6 +91,8 @@ export interface CurveRoundStartMessage {
   p1Spawn: { x: number; z: number; angle: number };
   p2Spawn: { x: number; z: number; angle: number };
   countdownMs: number;
+  /** This round's arena: size, obstacles and portals (host-generated). */
+  layout?: ArenaLayout;
 }
 
 export interface CurveCrashMessage {

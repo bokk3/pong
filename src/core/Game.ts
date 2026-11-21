@@ -191,6 +191,8 @@ export class Game {
     }
     // "Level" is wherever the player is holding the phone at the start of each round
     this.eventBus.on('curve:round_start', () => this.tilt.calibrate());
+    // Re-frame the top-down camera for the arena size
+    this.eventBus.on('curve:arena', ({ size }) => this.cameraCtrl.setCurveArenaSize(size));
 
     // Webcam mode toggle
     this.hud.onToggleWebcam = async () => {
@@ -661,7 +663,12 @@ export class Game {
     const oppName = isMultiplayer ? this.network.remoteUsername : `BOT (${diff.toUpperCase()})`;
     this.hud.setOpponentName(oppName);
     this.sound.playWhistle();
-    this.curveMode.startMatch(isMultiplayer, diff, isMultiplayer ? this.network.hostedTargetScore : 5);
+    this.curveMode.startMatch(
+      isMultiplayer,
+      diff,
+      isMultiplayer ? this.network.hostedTargetScore : 5,
+      isMultiplayer ? this.network.hostedCurveSettings : this.hud.curveSettings
+    );
   }
 
 

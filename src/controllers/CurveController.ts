@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PlayerId } from '../types';
 import { CurveTrail } from '../entities/CurveTrail';
+import { CurveArena, PORTAL_RADIUS } from '../core/CurveArena';
 
 export interface CurveConfig {
   speed: number;
@@ -34,10 +35,6 @@ function distToSegment(
   return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
 }
 
-// Larger Square 2D Arena size: 4.8 x 4.8 square for plenty of maneuvering room
-export const CURVE_ARENA_SIZE = 4.8;
-export const CURVE_ARENA_HALF = CURVE_ARENA_SIZE / 2;
-
 export class CurveController {
   public id: PlayerId;
   public trail: CurveTrail;
@@ -64,11 +61,18 @@ export class CurveController {
   private config: CurveConfig;
   private totalElapsed: number = 0;
 
-  // Arena bounds (pure square, no obstacles or net)
-  public readonly minX: number;
-  public readonly maxX: number;
-  public readonly minZ: number;
-  public readonly maxZ: number;
+  /** Shared arena (size, obstacles, portals). */
+  public arena: CurveArena | null = null;
+  /** Called when this curve jumps through a portal. */
+  public onTeleport: (() => void) | null = null;
+  private portalCooldown: number = 0;
+
+  // Arena bounds with a small safety margin
+  private get half(): number { return this.arena ? this.arena.half : 2.4; }
+  public get minX(): number { return -this.half + 0.04; }
+  public get maxX(): number { return this.half - 0.04; }
+  public get minZ(): number { return -this.half + 0.04; }
+  public get maxZ(): number { return this.half - 0.04; }
 
   constructor(id: PlayerId, color: number, isBot: boolean = false, config: Partial<CurveConfig> = {}) {
     this.id = id;
@@ -89,13 +93,6 @@ export class CurveController {
     this.headMesh = new THREE.Mesh(headGeo, headMat);
     this.headMesh.position.y = 0.052;
 
-    // Outer square boundaries with small safety padding
-    const margin = 0.04;
-    this.minX = -CURVE_ARENA_HALF + margin;
-    this.maxX = CURVE_ARENA_HALF - margin;
-    this.minZ = -CURVE_ARENA_HALF + margin;
-    this.maxZ = CURVE_ARENA_HALF - margin;
-
     this.scheduleNextGap();
   }
 
@@ -109,6 +106,7 @@ export class CurveController {
     this.isAlive = true;
     this.isDrawing = true;
     this.totalElapsed = 0;
+    this.portalCooldown = 0;
     this.scheduleNextGap();
 
     this.trail.reset();
@@ -166,6 +164,19 @@ export class CurveController {
     this.x += dx;
     this.z += dz;
 
+    // Portals: jump to the linked portal, keeping the heading. The remote curve's jumps arrive over the network.
+    this.portalCooldown = Math.max(0, this.portalCooldown - dt);
+    if (this.arena && !this.isRemote && this.portalCooldown === 0) {
+      const exit = this.arena.portalExit(this.x, this.z);
+      if (exit) {
+        this.x = exit.x + Math.cos(this.angle) * PORTAL_RADIUS * 1.1;
+        this.z = exit.z + Math.sin(this.angle) * PORTAL_RADIUS * 1.1;
+        this.trail.breakLine();
+        this.portalCooldown = 0.3;
+        if (this.onTeleport) this.onTeleport();
+      }
+    }
+
     this.updateHeadMesh();
 
     // 5. Add point to trail
@@ -200,6 +211,11 @@ export class CurveController {
 
     const headRadius = this.config.headRadius;
     const currPos = { x: currX, y: currZ };
+
+    // Obstacles
+    if (this.arena && this.arena.hitsObstacle(currX, currZ, headRadius)) {
+      return true;
+    }
 
     // 2. Collision against own trail (exclude last 0.22 seconds of trail to avoid self-colliding with head)
     const graceTime = 0.22;
@@ -279,6 +295,19 @@ export class CurveController {
         simX += Math.cos(simAngle) * (this.config.speed * stepDt);
         simZ += Math.sin(simAngle) * (this.config.speed * stepDt);
 
+        // Follow portals the way the real curve will
+        const exit = this.arena ? this.arena.portalExit(simX, simZ) : null;
+        if (exit) {
+          simX = exit.x + Math.cos(simAngle) * PORTAL_RADIUS * 1.1;
+          simZ = exit.z + Math.sin(simAngle) * PORTAL_RADIUS * 1.1;
+        }
+
+        // Obstacle check
+        if (this.arena && this.arena.hitsObstacle(simX, simZ, safeRadius + 0.02)) {
+          hitObstacle = true;
+          break;
+        }
+
         // Wall safety check
         if (simX <= this.minX + wallMargin || simX >= this.maxX - wallMargin ||
             simZ <= this.minZ + wallMargin || simZ >= this.maxZ - wallMargin) {
@@ -338,7 +367,7 @@ export class CurveController {
 
       // Border avoidance bonus: prefer heading towards open arena center
       const distFromCenter = Math.hypot(simX, simZ);
-      const centerBias = (1.0 - (distFromCenter / CURVE_ARENA_HALF)) * 1.2;
+      const centerBias = (1.0 - (distFromCenter / this.half)) * 1.2;
       score += centerBias;
 
       // Canyon / Pocket trap check at trajectory endpoint
@@ -370,7 +399,7 @@ export class CurveController {
 
           // 2. Wall-pinning tactic: if opponent is near border, cut off escape into center
           const oppDistFromCenter = Math.hypot(opponentState.x, opponentState.z);
-          if (oppDistFromCenter > CURVE_ARENA_HALF * 0.60) {
+          if (oppDistFromCenter > this.half * 0.60) {
             const botDistToCenter = Math.hypot(simX, simZ);
             if (botDistToCenter < oppDistFromCenter && distToOpp < 1.6) {
               score += isChampion ? 4.0 : 2.2;
@@ -394,6 +423,7 @@ export class CurveController {
     }
     const p = { x, y: z };
     const r = this.config.headRadius * 1.5;
+    if (this.arena && this.arena.hitsObstacle(x, z, r)) return true;
 
     for (let i = 0; i < this.trail.segments.length; i++) {
       if (this.totalElapsed - this.trail.segments[i].time < 0.25) continue;

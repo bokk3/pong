@@ -2,6 +2,7 @@ import { Peer, DataConnection } from 'peerjs';
 import { EventBus } from '../core/EventBus';
 import { GameModeType, LobbyRoom, MultiplayerRole } from '../types';
 import { NetworkMessage, PROTOCOL_VERSION } from './NetworkProtocol';
+import { CurveArenaSettings, DEFAULT_ARENA_SETTINGS, sanitizeArenaSettings } from '../core/CurveArena';
 
 const PEER_PREFIX = 'sp3d-';
 
@@ -99,7 +100,8 @@ export function sanitizeRoom(raw: unknown, now: number = Date.now()): LobbyRoom 
     targetScore,
     playerCount,
     createdAt,
-    isQuickMatch: r.isQuickMatch === true
+    isQuickMatch: r.isQuickMatch === true,
+    curveArena: gameMode === 'CURVE' ? sanitizeArenaSettings(r.curveArena) : undefined
   };
 }
 
@@ -114,6 +116,8 @@ export class NetworkManager {
   public remoteUsername: string = 'Opponent';
   public hostedTargetScore: number = 11;
   public activeGameMode: GameModeType = 'PONG';
+  /** Curve arena for matches this peer hosts; a client adopts the host's in the handshake. */
+  public hostedCurveSettings: CurveArenaSettings = { ...DEFAULT_ARENA_SETTINGS };
   public hostedRoomId: string | null = null;
 
   public isConnected: boolean = false;
@@ -383,7 +387,8 @@ export class NetworkManager {
         gameMode: this.activeGameMode,
         targetScore: this.hostedTargetScore,
         role: this.role,
-        protocolVersion: PROTOCOL_VERSION
+        protocolVersion: PROTOCOL_VERSION,
+        curveArena: this.hostedCurveSettings
       });
 
       this.clearHandshakeTimer();
@@ -460,6 +465,7 @@ export class NetworkManager {
         if (msg.targetScore && ALLOWED_TARGET_SCORES.includes(msg.targetScore)) {
           this.hostedTargetScore = msg.targetScore;
         }
+        this.hostedCurveSettings = sanitizeArenaSettings(msg.curveArena);
       } else if (this.hostedRoomId) {
         // Our room is now full; take it off the public list
         void this.closeLobbyRoom();
@@ -686,6 +692,7 @@ export class NetworkManager {
       status: 'waiting',
       playerCount: 1,
       isQuickMatch,
+      curveArena: gameMode === 'CURVE' ? this.hostedCurveSettings : undefined,
       createdAt: this.hostedRoomCreatedAt,
       timestamp: Date.now()
     };

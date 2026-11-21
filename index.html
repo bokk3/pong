@@ -349,9 +349,9 @@
           </div>
 
           <!-- Mode Select Showcase Cards -->
-          <div class="menu-section-block">
+          <div class="menu-section-block mode-picker">
             <div class="section-label-row">
-              <span class="section-label">CHOOSE ARENA MODE</span>
+              <span class="section-label">CHOOSE GAME MODE</span>
             </div>
             <div class="gamemode-buttons">
               <button class="gamemode-btn active" id="mode-pong-btn" data-mode="PONG">
@@ -399,6 +399,24 @@
                 <span class="diff-desc">Relentless AI</span>
               </button>
             </div>
+          </div>
+
+          <!-- Curve Battle arena settings (shown when Curve Battle is selected) -->
+          <div class="menu-section-block arena-picker" id="arena-picker-box" hidden>
+            <div class="section-label-row">
+              <span class="section-label">ARENA</span>
+            </div>
+            <div class="arena-options">
+                <div class="arena-size-buttons" role="radiogroup" aria-label="Arena size">
+                  <button type="button" class="arena-seg-btn" data-arena-size="S" role="radio" aria-checked="false">Small</button>
+                  <button type="button" class="arena-seg-btn active" data-arena-size="M" role="radio" aria-checked="true">Medium</button>
+                  <button type="button" class="arena-seg-btn" data-arena-size="L" role="radio" aria-checked="false">Large</button>
+                </div>
+                <div class="arena-toggles">
+                  <button type="button" class="arena-toggle-chip" data-arena-toggle="obstacles" aria-pressed="false">🧱 Obstacles</button>
+                  <button type="button" class="arena-toggle-chip" data-arena-toggle="portals" aria-pressed="false">🌀 Portals</button>
+                </div>
+              </div>
           </div>
 
           <!-- Play Action Hub -->
@@ -528,6 +546,20 @@
                 <option value="11" selected>First to 11 (Standard)</option>
                 <option value="21">First to 21 (Endurance)</option>
               </select>
+            </div>
+            <div class="create-field" id="create-arena-field" hidden>
+              <label>ARENA</label>
+              <div class="arena-options">
+                <div class="arena-size-buttons" role="radiogroup" aria-label="Arena size">
+                  <button type="button" class="arena-seg-btn" data-arena-size="S" role="radio" aria-checked="false">Small</button>
+                  <button type="button" class="arena-seg-btn active" data-arena-size="M" role="radio" aria-checked="true">Medium</button>
+                  <button type="button" class="arena-seg-btn" data-arena-size="L" role="radio" aria-checked="false">Large</button>
+                </div>
+                <div class="arena-toggles">
+                  <button type="button" class="arena-toggle-chip" data-arena-toggle="obstacles" aria-pressed="false">🧱 Obstacles</button>
+                  <button type="button" class="arena-toggle-chip" data-arena-toggle="portals" aria-pressed="false">🌀 Portals</button>
+                </div>
+              </div>
             </div>
             <div class="create-form-actions">
               <button id="lobby-submit-create-btn" class="primary-btn">HOST & WAIT FOR OPPONENT</button>
