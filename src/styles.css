@@ -975,20 +975,6 @@ select:focus-visible,
   overflow-y: auto;
 }
 
-/* Responsive sidebar */
-@media (max-width: 960px) {
-  .menu-layout {
-    flex-direction: column-reverse;
-    overflow-y: auto;
-    max-height: 96vh;
-    gap: 16px;
-  }
-  .controls-sidebar {
-    width: 100%;
-    max-height: 300px;
-  }
-}
-
 .pause-card {
   max-width: 440px;
 }
@@ -2007,56 +1993,6 @@ select:focus-visible,
     padding: 1px 5px;
   }
 
-  /* Main Menu compacting */
-  .logo-image {
-    width: 72px;
-    height: 72px;
-  }
-
-  .logo-title {
-    font-size: 26px;
-  }
-
-  .logo-badge {
-    font-size: 9px;
-  }
-
-  .tagline {
-    font-size: 11px;
-    margin-bottom: 6px;
-  }
-
-  .presence-bar {
-    padding: 4px 12px;
-    gap: 8px;
-    margin: 6px auto 12px auto;
-  }
-
-  .presence-pill {
-    font-size: 11px;
-    gap: 5px;
-  }
-
-  .presence-label {
-    font-size: 10px;
-  }
-
-  .difficulty-buttons {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .diff-btn {
-    padding: 8px 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .diff-desc {
-    display: none;
-  }
-
   .menu-actions {
     gap: 8px;
   }
@@ -2677,3 +2613,827 @@ select:focus-visible,
 }
 
 
+
+/* ==========================================================================
+   TOUCH-FIRST MAIN MENU
+   Phone portrait: full-screen sheet, Play + online actions pinned in thumb reach.
+   Phone landscape: two columns, no scrolling. Tablet: roomy card, 52px+ targets.
+   ========================================================================== */
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mode tiles (all sizes): icon + tag on top, title + description below */
+.gamemode-btn {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.mode-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mode-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 3px 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.mode-tag-pong {
+  color: var(--arcade-cyan);
+  background: rgba(0, 210, 255, 0.12);
+  border: 1px solid rgba(0, 210, 255, 0.35);
+}
+
+.mode-tag-curve {
+  color: #fdba74;
+  background: rgba(255, 85, 0, 0.12);
+  border: 1px solid rgba(255, 120, 40, 0.4);
+}
+
+.gamemode-text {
+  gap: 2px;
+}
+
+.gamemode-title {
+  font-size: 14px;
+}
+
+.gamemode-desc {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* Buttons use the game font everywhere */
+.diff-btn,
+.hub-btn,
+.play-hero-btn,
+.gamemode-btn {
+  font-family: var(--font-display);
+}
+
+/* Touch screens: no sticky hover lifts, give a press response instead */
+@media (hover: none) {
+  .gamemode-btn:hover,
+  .diff-btn:hover,
+  .hub-btn:hover,
+  .play-hero-btn:hover,
+  .primary-btn:hover,
+  .secondary-btn:hover,
+  .multiplayer-glow-btn:hover,
+  .logo-image:hover {
+    transform: none;
+  }
+
+  .gamemode-btn:active,
+  .diff-btn:active,
+  .hub-btn:active,
+  .play-hero-btn:active,
+  .primary-btn:active,
+  .secondary-btn:active,
+  .mini-aux-btn:active {
+    transform: scale(0.97);
+    transition-duration: 0.06s;
+  }
+}
+
+/* ---------- Tablet & small laptop (sidebar hidden, single card) ---------- */
+@media (max-width: 960px) {
+  #main-menu {
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  #main-menu .menu-layout {
+    max-width: 560px;
+    max-height: 100%;
+    padding: 0;
+  }
+
+  #main-menu .menu-card {
+    max-width: 560px;
+    max-height: calc(100dvh - 32px);
+    padding: 26px 24px;
+    gap: 16px;
+  }
+
+  .gamemode-btn {
+    min-height: 96px;
+  }
+
+  .diff-btn {
+    min-height: 64px;
+    justify-content: center;
+  }
+
+  .play-hero-btn {
+    min-height: 64px;
+  }
+
+  .hub-btn {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    min-height: 76px;
+    gap: 6px;
+    border-radius: 16px;
+  }
+
+  .play-hero-btn {
+    border-radius: 18px;
+  }
+
+  .hub-btn-text {
+    align-items: center;
+  }
+
+  .menu-bottom-bar {
+    gap: 10px;
+  }
+
+  .bottom-sens-control {
+    flex: 1 1 220px;
+  }
+
+  .bottom-sens-control input[type="range"] {
+    flex: 1;
+    width: auto;
+    min-width: 90px;
+    height: 28px;
+  }
+
+  .bottom-aux-actions .mini-aux-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+}
+
+/* ---------- Phone portrait ---------- */
+@media (max-width: 600px) and (orientation: portrait), (max-width: 480px) {
+  #main-menu {
+    padding: 0;
+  }
+
+  #main-menu .menu-layout {
+    max-width: none;
+    height: 100%;
+    max-height: none;
+  }
+
+  #main-menu .menu-card {
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    gap: 14px;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  /* Header: one compact row */
+  .menu-hero-header {
+    gap: 10px;
+  }
+
+  .game-logo {
+    gap: 12px;
+    width: 100%;
+  }
+
+  .logo-image {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+  }
+
+  .logo-badge-row {
+    gap: 6px;
+  }
+
+  .logo-badge,
+  .version-badge {
+    font-size: 9px;
+  }
+
+  .logo-title {
+    font-size: 26px;
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .presence-bar {
+    margin: 0 auto;
+    padding: 5px 12px;
+    gap: 8px;
+    max-width: 100%;
+  }
+
+  .presence-pill {
+    font-size: 12px;
+    gap: 5px;
+  }
+
+  .presence-label {
+    font-size: 11px;
+  }
+
+  .presence-detail {
+    display: none;
+  }
+
+  /* Mode tiles: two big tap targets */
+  .gamemode-buttons {
+    gap: 10px;
+  }
+
+  .gamemode-btn {
+    min-height: 104px;
+    padding: 12px;
+  }
+
+  .gamemode-icon {
+    font-size: 26px;
+  }
+
+  .gamemode-title {
+    font-size: 15px;
+  }
+
+  /* Difficulty: one-row segmented switch */
+  .difficulty-buttons {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .diff-btn {
+    min-height: 56px;
+    padding: 8px 4px;
+    gap: 2px;
+  }
+
+  .diff-title {
+    font-size: 12px;
+  }
+
+  .diff-desc {
+    display: none;
+  }
+
+  /* Settings row sits above the pinned actions */
+  .menu-bottom-bar {
+    order: 4;
+    padding-top: 0;
+    border-top: none;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bottom-sens-control {
+    flex: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 6px 14px;
+    min-height: 48px;
+  }
+
+  .bottom-aux-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .bottom-aux-actions .mini-aux-btn {
+    justify-content: center;
+    min-height: 48px;
+    border-radius: 14px;
+  }
+
+  /* Pinned action dock in thumb reach */
+  .menu-action-hub {
+    order: 5;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: auto calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left)));
+    padding: 18px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: linear-gradient(to top, rgba(7, 13, 28, 0.98) 72%, rgba(7, 13, 28, 0));
+    gap: 10px;
+  }
+
+  .play-hero-btn {
+    width: 100%;
+    min-height: 64px;
+    padding: 12px 20px;
+    border-radius: 18px;
+  }
+
+  .btn-main-title {
+    font-size: 18px;
+  }
+
+  .multiplayer-hub-grid {
+    gap: 8px;
+  }
+
+  .hub-btn {
+    min-height: 68px;
+    padding: 8px 4px;
+    gap: 4px;
+    border-radius: 14px;
+  }
+
+  .hub-btn-icon {
+    font-size: 20px;
+  }
+
+  .hub-btn-text strong {
+    font-size: 11px;
+    line-height: 1.15;
+  }
+
+  .hub-btn-text small {
+    display: none;
+  }
+}
+
+/* Very narrow phones (e.g. 320px wide) */
+@media (max-width: 360px) {
+  .logo-title {
+    font-size: 22px;
+  }
+
+  .gamemode-desc {
+    display: none;
+  }
+
+  .gamemode-btn {
+    min-height: 84px;
+  }
+
+  .presence-pill:not(.online-pill),
+  .presence-divider {
+    display: none;
+  }
+}
+
+/* ---------- Phone landscape: two columns, no scrolling ---------- */
+@media (orientation: landscape) and (max-height: 520px) {
+  #main-menu {
+    padding: 0;
+  }
+
+  #main-menu .menu-layout {
+    max-width: none;
+    height: 100%;
+    max-height: none;
+  }
+
+  #main-menu .menu-card {
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr;
+    grid-template-areas:
+      "header actions"
+      "mode   actions"
+      "diff   actions"
+      "bar    actions";
+    column-gap: 20px;
+    row-gap: 10px;
+    align-content: start;
+    padding: max(10px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    overflow-y: auto;
+  }
+
+  .menu-hero-header { grid-area: header; flex-direction: row; justify-content: space-between; gap: 10px; }
+  .menu-section-block:not(.difficulty-picker) { grid-area: mode; }
+  .difficulty-picker { grid-area: diff; }
+  .menu-bottom-bar { grid-area: bar; align-self: start; padding-top: 0; border-top: none; }
+
+  .menu-action-hub {
+    grid-area: actions;
+    align-self: center;
+    margin: 0;
+    gap: 10px;
+  }
+
+  .logo-image {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .logo-title {
+    font-size: 20px;
+  }
+
+  .logo-badge-row,
+  .tagline {
+    display: none;
+  }
+
+  .presence-bar {
+    margin: 0;
+    padding: 4px 10px;
+    gap: 6px;
+  }
+
+  .presence-pill:not(.online-pill),
+  .presence-divider {
+    display: none;
+  }
+
+  .section-label-row {
+    display: none;
+  }
+
+  .gamemode-btn {
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .mode-tag {
+    display: none;
+  }
+
+  .gamemode-icon {
+    font-size: 20px;
+  }
+
+  .gamemode-desc,
+  .diff-desc,
+  .diff-icon {
+    display: none;
+  }
+
+  .diff-btn {
+    min-height: 44px;
+    padding: 6px 4px;
+  }
+
+  .bottom-sens-control input[type="range"] {
+    width: 80px;
+  }
+
+  .play-hero-btn {
+    min-height: 64px;
+  }
+
+  .hub-btn {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    min-height: 64px;
+    padding: 8px 4px;
+    gap: 4px;
+    border-radius: 14px;
+  }
+
+  .hub-btn-text {
+    align-items: center;
+  }
+
+  .hub-btn-text small {
+    display: none;
+  }
+
+  .play-hero-btn {
+    border-radius: 18px;
+  }
+}
+
+/* ==========================================================================
+   TOUCH-FIRST MODALS (matchmaking, lobby, pause, game over)
+   ========================================================================== */
+
+/* Flex children default to their intrinsic input width and overflow; let them shrink */
+.nickname-input-wrap input,
+.join-input-group input {
+  min-width: 0;
+}
+
+.dice-btn {
+  flex-shrink: 0;
+  min-width: 40px;
+  min-height: 36px;
+}
+
+@media (max-width: 600px) and (orientation: portrait), (max-width: 480px) {
+  /* Modals become full-screen sheets */
+  #matchmaking-modal,
+  #lobby-modal {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  #matchmaking-modal .modal-card,
+  #lobby-modal .lobby-card {
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .modal-close-btn {
+    top: max(14px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+    z-index: 3;
+  }
+
+  /* Keep titles clear of the close button */
+  .mm-header,
+  .lobby-header-main {
+    padding-right: 52px;
+    text-align: left;
+  }
+
+  .mm-header {
+    margin-bottom: 14px;
+  }
+
+  .modal-title {
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  .modal-subtitle {
+    font-size: 12px;
+  }
+
+  .nickname-input-wrap {
+    padding: 4px 6px 4px 12px;
+    min-height: 52px;
+  }
+
+  .nickname-input-wrap input {
+    font-size: 16px; /* 16px+ stops iOS zooming into the field */
+  }
+
+  .dice-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .friend-boxes {
+    gap: 12px;
+  }
+
+  .copy-btn,
+  .join-input-group .primary-btn {
+    min-height: 48px;
+  }
+
+  .join-input-group input {
+    flex: 1;
+    font-size: 18px;
+    min-height: 48px;
+  }
+
+  #matchmaking-modal .modal-footer .secondary-btn,
+  #lobby-modal .modal-footer .secondary-btn {
+    width: 100%;
+    min-height: 52px;
+  }
+
+  /* ----- Lobby ----- */
+  .lobby-header {
+    gap: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+
+  .lobby-stats-strip {
+    font-size: 11px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .lobby-toolbar {
+    gap: 10px;
+  }
+
+  /* Filter chips scroll sideways instead of wrapping into a ragged block */
+  .lobby-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -16px;
+    padding: 0 16px 2px;
+  }
+
+  .lobby-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lobby-filter-btn {
+    flex-shrink: 0;
+    min-height: 40px;
+  }
+
+  .lobby-toolbar-actions {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px;
+  }
+
+  .lobby-toolbar-actions button {
+    min-height: 48px;
+  }
+
+  .lobby-create-panel input,
+  .lobby-create-panel select {
+    font-size: 16px;
+    min-height: 48px;
+  }
+
+  .lobby-table-wrapper {
+    max-height: none;
+    flex: 1 0 auto;
+    background: transparent;
+    border: none;
+  }
+
+  /* Table rows become tappable room cards */
+  .lobby-table thead {
+    display: none;
+  }
+
+  .lobby-table,
+  .lobby-table tbody {
+    display: block;
+  }
+
+  .lobby-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .lobby-table tr {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    grid-template-areas:
+      "name   name   name action"
+      "mode   status .    action";
+    align-items: center;
+    gap: 6px 8px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px;
+  }
+
+  .lobby-table td {
+    display: block;
+    padding: 0;
+    border: none;
+    font-size: 13px;
+  }
+
+  .lobby-table td:nth-child(1) { grid-area: name; font-size: 15px; }
+  .lobby-table td:nth-child(2) { grid-area: mode; }
+  .lobby-table td:nth-child(5) { grid-area: status; }
+  .lobby-table td:nth-child(6) { grid-area: action; }
+
+  .lobby-table tr.lobby-empty-row {
+    display: block;
+    text-align: center;
+    padding: 28px 16px;
+  }
+
+  .lobby-table tr.lobby-empty-row td {
+    display: block;
+  }
+
+  .lobby-join-btn {
+    min-height: 48px;
+    min-width: 76px;
+    font-size: 14px;
+  }
+}
+
+/* Phone landscape: modals use the full screen too */
+@media (orientation: landscape) and (max-height: 520px) {
+  #matchmaking-modal,
+  #lobby-modal,
+  #pause-menu,
+  #game-over-screen {
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  #matchmaking-modal .modal-card,
+  #lobby-modal .lobby-card,
+  .game-over-card {
+    max-height: 100%;
+    overflow-y: auto;
+  }
+
+  .friend-boxes {
+    flex-direction: row;
+  }
+
+  .radar-container {
+    display: none;
+  }
+
+  .game-over-card {
+    padding: 16px 20px;
+    gap: 10px;
+  }
+
+  .result-title {
+    font-size: 30px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+    margin: 4px 0;
+  }
+
+  .stat-box {
+    padding: 8px 4px;
+  }
+
+  .stat-num {
+    font-size: 20px;
+  }
+}
+
+/* Game over & pause on phones: big full-width buttons */
+@media (max-width: 600px) {
+  .game-over-card,
+  .pause-card {
+    padding: 24px 18px;
+  }
+
+  .game-over-actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .game-over-actions .primary-btn,
+  .game-over-actions .secondary-btn,
+  .pause-card .menu-actions .primary-btn,
+  .pause-card .menu-actions .secondary-btn {
+    width: 100%;
+    min-height: 52px;
+  }
+
+  .pause-card .menu-actions {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/* Online buttons: beat the generic .secondary-btn padding and allow grid cells to shrink */
+.multiplayer-hub-grid .hub-btn {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.multiplayer-hub-grid .hub-btn-text strong {
+  overflow-wrap: anywhere;
+}
+
+#main-menu .menu-card {
+  overflow-x: hidden;
+}
+
+@media (max-width: 600px) and (orientation: portrait), (max-width: 480px), (orientation: landscape) and (max-height: 520px) {
+  .multiplayer-hub-grid .hub-btn {
+    padding: 8px 4px;
+    border-radius: 14px;
+  }
+}

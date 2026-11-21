@@ -516,18 +516,33 @@ export class HUD {
     // Copy Invite Link Button
     this.copyLinkBtn.addEventListener('click', async () => {
       const code = this.displayRoomCodeEl.textContent?.trim();
-      if (!code || code === '------') return;
+      if (!code || code === '------' || code === '...' || code === 'OFFLINE') return;
       const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
+
+      // Phones/tablets: open the native share sheet (Messages, WhatsApp, ...)
+      if (this.canNativeShare()) {
+        try {
+          await navigator.share({
+            title: 'Spin Pong 3D',
+            text: `Play me in Spin Pong 3D! Room code ${code}`,
+            url
+          });
+          return;
+        } catch (err) {
+          // User closed the sheet: done. Anything else: fall back to copying.
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+        }
+      }
+
       try {
         await navigator.clipboard.writeText(url);
         this.copyLinkBtn.innerHTML = '<span>✅ Copied Invite Link!</span>';
-        setTimeout(() => {
-          this.copyLinkBtn.innerHTML = '<span>📋 Copy Invite Link</span>';
-        }, 2200);
+        setTimeout(() => this.resetInviteButtonLabel(), 2200);
       } catch {
         prompt('Copy room link:', url);
       }
     });
+    this.resetInviteButtonLabel();
 
     // Join Room Button
     this.joinRoomBtn.addEventListener('click', async () => {
@@ -938,6 +953,16 @@ export class HUD {
     const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
     const noun = nouns[Math.floor(Math.random() * nouns.length)];
     return `${adj}${noun}`;
+  }
+
+  private canNativeShare(): boolean {
+    return typeof navigator.share === 'function' && this.deviceDetector.info.isTouchDevice;
+  }
+
+  private resetInviteButtonLabel(): void {
+    this.copyLinkBtn.innerHTML = this.canNativeShare()
+      ? '<span>📤 Share Invite Link</span>'
+      : '<span>📋 Copy Invite Link</span>';
   }
 
   // --- Public Display Setters ---
