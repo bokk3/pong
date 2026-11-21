@@ -43,6 +43,8 @@ export class CurveController {
   public trail: CurveTrail;
   public isBot: boolean = false;
   public isAlive: boolean = true;
+  /** Driven by network updates from the other peer: no local gap timer or crash detection. */
+  public isRemote: boolean = false;
   public difficulty: 'novice' | 'pro' | 'master' = 'novice';
 
   // Head state on arena plane (X, Z)
@@ -138,9 +140,11 @@ export class CurveController {
       this.angle += this.steering * this.config.turnSpeed * dt;
     }
 
-    // 3. Gap mechanic update
+    // 3. Gap mechanic update (remote curves receive isDrawing over the network)
     this.gapTimer += dt;
-    if (this.isDrawing) {
+    if (this.isRemote) {
+      // driven by CURVE_INPUT
+    } else if (this.isDrawing) {
       if (this.gapTimer >= this.timeToNextGap) {
         this.isDrawing = false;
         this.gapTimer = 0;
@@ -167,8 +171,8 @@ export class CurveController {
     // 5. Add point to trail
     this.trail.addPoint(this.x, this.z, this.isDrawing, this.totalElapsed);
 
-    // 6. Check Collision
-    if (this.checkCollision(prevX, prevZ, this.x, this.z, opponentTrail)) {
+    // 6. Check Collision (each peer is authoritative only for its own curve)
+    if (!this.isRemote && this.checkCollision(prevX, prevZ, this.x, this.z, opponentTrail)) {
       this.isAlive = false;
       return true; // Just crashed
     }

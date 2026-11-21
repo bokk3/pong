@@ -22,21 +22,29 @@ interface ActiveRoom {
   lastSeen: number;
 }
 
-// In-memory edge presence cache (persists in warm Cloudflare Workers instances)
+// In-memory edge presence cache. It only lives as long as a warm worker isolate and is not shared
+// between isolates/regions, so counts are approximate; the global room list comes from the ntfy relay.
 const activePeers = new Map<string, PeerPresence>();
 const activeRooms = new Map<string, ActiveRoom>();
+const MAX_PEERS = 5000;
+const MAX_ROOMS = 200;
+
+function clampText(value: unknown, fallback: string, max: number): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return (text || fallback).slice(0, max);
+}
 
 function cleanupStaleData(): void {
   const now = Date.now();
   for (const [id, peer] of activePeers.entries()) {
-    if (now - peer.lastSeen > 20000) {
+    if (now - peer.lastSeen > 40000) {
       activePeers.delete(id);
     }
   }
 
   for (const [id, room] of activeRooms.entries()) {
-    // 25s timeout for room host heartbeats
-    if (now - room.lastSeen > 25000) {
+    // Host heartbeats every 20s; allow for one missed beat
+    if (now - room.lastSeen > 50000) {
       activeRooms.delete(id);
     }
   }
@@ -49,14 +57,24 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
       roomData?: Partial<ActiveRoom>;
     };
 
-    const { peerId, username, status, gameMode, region, action, roomData } = data;
+    const { peerId, region, action, roomData } = data;
+    // Public endpoint: validate and clamp everything before it is stored or echoed back to other players
+    const username = clampText(data.username, 'Player', 16);
+    const gameMode: 'PONG' | 'CURVE' = data.gameMode === 'CURVE' ? 'CURVE' : 'PONG';
+    const rawStatus = data.status as string | undefined;
+    const status: PeerPresence['status'] | 'leave' =
+      rawStatus === 'searching' || rawStatus === 'playing' || rawStatus === 'leave' ? rawStatus : 'menu';
 
-    if (!peerId) {
-      return new Response(JSON.stringify({ error: 'Missing peerId' }), {
+    if (typeof peerId !== 'string' || !/^sp3d-[a-z0-9]{3,20}$/.test(peerId)) {
+      return new Response(JSON.stringify({ error: 'Invalid peerId' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });
     }
+
+    cleanupStaleData();
+    // Hard caps so a flood of fake peers cannot grow worker memory without bound
+    const canAddPeer = activePeers.has(peerId) || activePeers.size < MAX_PEERS;
 
     if (status === 'leave') {
       activePeers.delete(peerId);
@@ -66,45 +84,46 @@ export async function onRequestPost(context: { request: Request }): Promise<Resp
           activeRooms.delete(rId);
         }
       }
-    } else {
+    } else if (canAddPeer) {
       activePeers.set(peerId, {
         peerId,
-        username: username || 'Player',
-        status: status || 'menu',
-        gameMode: gameMode || 'PONG',
-        region: region || 'global',
+        username,
+        status,
+        gameMode,
+        region: clampText(region, 'global', 16),
         lastSeen: Date.now()
       });
     }
 
-    // Room management actions
+    // Room management actions. A peer may only list or close its own room (roomId === its peerId).
     if (action === 'create_room' || action === 'update_room') {
-      const roomId = roomData?.roomId || peerId;
-      activeRooms.set(roomId, {
-        roomId,
-        roomName: roomData?.roomName || `${username || 'Player'}'s Arena`,
-        hostPeerId: peerId,
-        hostName: username || 'Player',
-        gameMode: roomData?.gameMode || gameMode || 'PONG',
-        status: roomData?.status || 'waiting',
-        targetScore: roomData?.targetScore || (gameMode === 'CURVE' ? 5 : 11),
-        playerCount: roomData?.playerCount || 1,
-        createdAt: activeRooms.get(roomId)?.createdAt || Date.now(),
-        lastSeen: Date.now()
-      });
-    } else if (action === 'close_room') {
-      if (roomData?.roomId) {
-        activeRooms.delete(roomData.roomId);
+      const roomId = peerId;
+      if (activeRooms.has(roomId) || activeRooms.size < MAX_ROOMS) {
+        const roomMode: 'PONG' | 'CURVE' = roomData?.gameMode === 'CURVE' ? 'CURVE' : gameMode;
+        const target = Number(roomData?.targetScore);
+        activeRooms.set(roomId, {
+          roomId,
+          roomName: clampText(roomData?.roomName, `${username}'s Arena`, 32),
+          hostPeerId: peerId,
+          hostName: username,
+          gameMode: roomMode,
+          status: roomData?.status === 'playing' ? 'playing' : 'waiting',
+          targetScore: [5, 11, 21].includes(target) ? target : (roomMode === 'CURVE' ? 5 : 11),
+          playerCount: roomData?.playerCount === 2 ? 2 : 1,
+          createdAt: activeRooms.get(roomId)?.createdAt || Date.now(),
+          lastSeen: Date.now()
+        });
       }
+    } else if (action === 'close_room') {
+      activeRooms.delete(peerId);
     }
-
-    cleanupStaleData();
 
     return getPresenceResponse(peerId);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Server error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
+    // Usually a malformed JSON body; don't echo internals back
+    void err;
+    return new Response(JSON.stringify({ error: 'Bad request' }), {
+      status: 400,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }

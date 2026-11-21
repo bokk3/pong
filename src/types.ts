@@ -25,6 +25,7 @@ export interface LobbyRoom {
   targetScore: number;
   playerCount: number;
   createdAt: number;
+  isQuickMatch: boolean;
 }
 
 export interface LobbyStats {
@@ -70,6 +71,8 @@ export interface ShotInfo {
 export interface MatchScore {
   player: number;
   cpu: number;
+  /** Points needed to win (must still win by 2). */
+  targetScore: number;
   server: PlayerId;
   consecutiveServes: number;
   rallyCount: number;

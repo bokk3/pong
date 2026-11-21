@@ -56,6 +56,7 @@ export class Game {
   private ballSyncTimer: number = 0;
   private isRunning: boolean = false;
   private isPaused: boolean = false;
+  private botDifficulty: Difficulty = 'pro';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -210,13 +211,13 @@ export class Game {
     this.hud.onStartMatch = (diff: Difficulty) => {
       this.sound.init();
       this.mode = 'BOT';
+      this.botDifficulty = diff;
       if (this.gameModeType === 'CURVE') {
         this.startCurveMatch(false, diff);
       } else {
         this.hud.setOpponentName(`CPU (${diff.toUpperCase()})`);
         this.aiCtrl.setDifficulty(diff);
-        this.stateMachine.resetMatch();
-        this.startMatchSequence();
+        this.startPongMatch();
       }
     };
 
@@ -232,41 +233,46 @@ export class Game {
       if (this.gameModeType === 'CURVE') {
         this.startCurveMatch(true);
       } else {
-        this.hud.setOpponentName(remoteUsername);
+        this.hud.setOpponentName(remoteUsername.toUpperCase());
         this.remotePlayerCtrl.resetPosition();
-        this.stateMachine.resetMatch();
-        this.startMatchSequence();
+        this.startPongMatch();
       }
     };
 
+    // Called for single-player "play again"/"restart", and in multiplayer only once BOTH players
+    // agreed to a rematch (the HUD negotiates that over the network).
     this.hud.onRematch = () => {
       this.isPaused = false;
       this.hud.showPauseMenu(false);
       if (this.gameModeType === 'CURVE') {
-        this.startCurveMatch(this.mode === 'MULTIPLAYER');
-      } else if (this.mode === 'MULTIPLAYER' && this.network.isConnected) {
-
-        this.network.send({ type: 'REMATCH_REQUEST', status: 'requested' });
-        this.eventBus.emit('multiplayer:rematch', { from: 'local', status: 'requested' });
+        this.startCurveMatch(this.mode === 'MULTIPLAYER', this.botDifficulty);
       } else {
-        this.stateMachine.resetMatch();
-        this.startMatchSequence();
+        if (this.mode === 'MULTIPLAYER') {
+          this.remotePlayerCtrl.resetPosition();
+        }
+        this.startPongMatch();
       }
     };
 
-    this.hud.onReturnToMenu = () => {
-      this.isPaused = false;
-      this.hud.showPauseMenu(false);
+    this.hud.onReturnToMenu = () => this.returnToMenu();
+
+    // Opponent dropped (tab closed, Wi-Fi lost...): end the online match cleanly instead of
+    // leaving the player facing a frozen opponent.
+    this.eventBus.on('network:status', ({ status }) => {
+      if (status !== 'disconnected' || this.mode !== 'MULTIPLAYER') return;
+      const state = this.stateMachine.state;
+      if (state === 'MENU' || state === 'GAME_OVER') return;
+      this.hud.showCallout('OPPONENT LEFT THE MATCH', 2200);
       this.ball.physics.stop();
-      if (this.mode === 'MULTIPLAYER') {
-        this.network.disconnect();
-      }
       this.mode = 'BOT';
-      this.setEntitiesVisibility(true);
-      this.curveMode.group.visible = false;
-      this.cameraCtrl.setMode('PONG');
-      this.stateMachine.setState('MENU');
-    };
+      window.setTimeout(() => {
+        if (this.stateMachine.state !== 'MENU') {
+          this.hud.hideGameOver();
+          this.hud.showMainMenu();
+          this.returnToMenu();
+        }
+      }, 2000);
+    });
 
     // State Changes
     this.eventBus.on('state:changed', ({ to }) => {
@@ -301,6 +307,18 @@ export class Game {
     };
 
     window.addEventListener('keydown', (e) => {
+      // Never hijack keys while the player is typing a nickname / room code
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+
+      const inMatch = this.isInMatch();
+      // Stop Space/arrows from scrolling or re-clicking whatever menu button still has focus
+      if (inMatch && (e.code === 'Space' || e.code.startsWith('Arrow'))) {
+        e.preventDefault();
+      }
+
       if (this.gameModeType === 'CURVE') {
         if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
           curveKeys.left = true;
@@ -309,18 +327,23 @@ export class Game {
           curveKeys.right = true;
           updateCurveSteering();
         }
-      } else if (e.code === 'Space' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
+      } else if (e.code === 'Space' && !this.isPaused && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
 
-      if (e.code === 'Escape') {
-        if (this.stateMachine.state !== 'MENU' && this.stateMachine.state !== 'GAME_OVER') {
-          this.isPaused = !this.isPaused;
-          this.hud.showPauseMenu(this.isPaused);
-          if (!this.isPaused) {
-            this.lastTime = performance.now();
-          }
-        }
+      if (e.code === 'Escape' && inMatch) {
+        this.togglePause();
+      }
+    });
+
+    this.hud.onPauseRequest = () => {
+      if (this.isInMatch()) this.togglePause(true);
+    };
+
+    // Auto-pause single-player matches when the tab is hidden or the window loses focus
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.mode === 'BOT' && this.isInMatch() && !this.isPaused) {
+        this.togglePause(true);
       }
     });
 
@@ -338,7 +361,7 @@ export class Game {
 
 
     this.canvas.addEventListener('pointerdown', () => {
-      if (this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
+      if (!this.isPaused && this.gameModeType === 'PONG' && this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
         this.playerCtrl.executeServe();
       }
     });
@@ -392,16 +415,16 @@ export class Game {
       this.stadium.celebrate();
       this.sound.playCheer();
 
-      // Host broadcasts the point and score to client
+      // Host broadcasts the point to the client. Deferred so the state machine has finished
+      // rotating the server / detecting game over before the score is serialized.
       if (this.mode === 'MULTIPLAYER' && this.network.role === 'HOST' && this.network.isConnected) {
-        this.network.send({
-          type: 'POINT_SCORED',
-          winner,
-          reason
-        });
-        this.network.send({
-          type: 'SCORE_SYNC',
-          score: this.stateMachine.score
+        queueMicrotask(() => {
+          this.network.send({
+            type: 'POINT_SCORED',
+            winner,
+            reason,
+            score: { ...this.stateMachine.score }
+          });
         });
       }
 
@@ -451,16 +474,9 @@ export class Game {
     });
   }
 
+  /** The score is always kept from the local point of view (PLAYER = this device), online too. */
   private isLocalPlayerTurnToServe(): boolean {
-    if (this.mode === 'BOT') {
-      return this.stateMachine.score.server === 'PLAYER';
-    }
-    // In Multiplayer: Host is PLAYER, Client is CPU from local perspective
-    if (this.network.role === 'HOST') {
-      return this.stateMachine.score.server === 'PLAYER';
-    } else {
-      return this.stateMachine.score.server === 'CPU';
-    }
+    return this.stateMachine.score.server === 'PLAYER';
   }
 
   private setEntitiesVisibility(visible: boolean): void {
@@ -474,6 +490,60 @@ export class Game {
     this.stadium.group.visible = true;
   }
 
+  private isInMatch(): boolean {
+    const state = this.stateMachine.state;
+    return state !== 'MENU' && state !== 'GAME_OVER';
+  }
+
+  /**
+   * Single player: freezes the simulation. Online: only opens the menu overlay, since the opponent's
+   * game keeps running and a local freeze would desync the two peers.
+   */
+  private togglePause(force?: boolean): void {
+    const open = force ?? !this.hud.isPauseMenuOpen();
+    if (this.mode === 'MULTIPLAYER') {
+      this.isPaused = false;
+      this.hud.showPauseMenu(open, true);
+      return;
+    }
+    this.isPaused = open;
+    this.hud.showPauseMenu(open, false);
+    if (!open) {
+      this.lastTime = performance.now();
+    }
+  }
+
+  private returnToMenu(): void {
+    this.isPaused = false;
+    this.hud.showPauseMenu(false);
+    this.hud.setCurveTouchControls(false);
+    this.ball.physics.stop();
+    this.stateMachine.cancelPendingServe();
+    this.stateMachine.isAuthoritative = true;
+    const wasMultiplayer = this.mode === 'MULTIPLAYER';
+    // Switch mode before disconnecting so our own disconnect is not treated as the opponent leaving
+    this.mode = 'BOT';
+    if (wasMultiplayer) {
+      this.network.disconnect();
+    }
+    this.gameModeType = this.hud.selectedGameMode;
+    this.setEntitiesVisibility(true);
+    this.curveMode.group.visible = false;
+    this.cameraCtrl.setMode('PONG');
+    this.stateMachine.setState('MENU');
+  }
+
+  /** Starts (or restarts) a Pong match for the current mode. Host/bot judge points; an online client follows the host. */
+  private startPongMatch(): void {
+    const isMultiplayer = this.mode === 'MULTIPLAYER';
+    const isClient = isMultiplayer && this.network.role === 'CLIENT';
+    this.stateMachine.isAuthoritative = !isClient;
+    const target = isMultiplayer ? this.network.hostedTargetScore : 11;
+    // The host always serves first; on the client that is the "CPU" side
+    this.stateMachine.resetMatch(target, isClient ? 'CPU' : 'PLAYER');
+    this.startMatchSequence();
+  }
+
   private startCurveMatch(isMultiplayer: boolean, diff: Difficulty = 'pro'): void {
     this.gameModeType = 'CURVE';
     this.setEntitiesVisibility(false); // Hides ping pong table, net, paddles, ball, and wood floor (stadium crowd stays visible)
@@ -484,7 +554,7 @@ export class Game {
     const oppName = isMultiplayer ? this.network.remoteUsername : `BOT (${diff.toUpperCase()})`;
     this.hud.setOpponentName(oppName);
     this.sound.playWhistle();
-    this.curveMode.startMatch(isMultiplayer, diff);
+    this.curveMode.startMatch(isMultiplayer, diff, isMultiplayer ? this.network.hostedTargetScore : 5);
   }
 
 
@@ -519,7 +589,7 @@ export class Game {
       const invVz = -msg.velocity[2];
 
       const invSx = -msg.spin[0];
-      const invSy = -msg.spin[1];
+      const invSy = msg.spin[1]; // rotating 180° about Y keeps the Y (sidespin) axis
       const invSz = -msg.spin[2];
 
       this.ball.physics.position.set(invX, invY, invZ);
@@ -553,7 +623,7 @@ export class Game {
         const invVz = -msg.velocity[2];
 
         const invSx = -msg.spin[0];
-        const invSy = -msg.spin[1];
+        const invSy = msg.spin[1]; // rotating 180° about Y keeps the Y (sidespin) axis
         const invSz = -msg.spin[2];
 
         if (msg.isActive) {
@@ -577,22 +647,15 @@ export class Game {
     }
 
     if (msg.type === 'POINT_SCORED') {
-      if (this.network.role === 'CLIENT') {
-        const localWinner: PlayerId = msg.winner === 'PLAYER' ? 'CPU' : 'PLAYER';
-        this.stateMachine.applyRemotePoint(localWinner, msg.reason, this.stateMachine.score);
-      }
-      return;
-    }
-
-    if (msg.type === 'SCORE_SYNC') {
-      if (this.network.role === 'CLIENT') {
-        const invertedScore = {
+      if (this.network.role === 'CLIENT' && this.gameModeType === 'PONG') {
+        const flip = (id: PlayerId): PlayerId => (id === 'PLAYER' ? 'CPU' : 'PLAYER');
+        const localScore = {
           ...msg.score,
           player: msg.score.cpu,
           cpu: msg.score.player,
-          server: (msg.score.server === 'PLAYER' ? 'CPU' : 'PLAYER') as PlayerId
+          server: flip(msg.score.server)
         };
-        this.stateMachine.syncScore(invertedScore);
+        this.stateMachine.applyRemotePoint(flip(msg.winner), msg.reason, localScore);
       }
       return;
     }
@@ -675,7 +738,8 @@ export class Game {
 
 
     // Classic Pong simulation loop
-    const isMatchPoint = this.stateMachine.score.player >= 10 || this.stateMachine.score.cpu >= 10;
+    const { player, cpu, targetScore } = this.stateMachine.score;
+    const isMatchPoint = player >= targetScore - 1 || cpu >= targetScore - 1;
     const targetScale = (isMatchPoint && this.stateMachine.state === 'RALLY') ? 0.85 : 1.0;
     this.timeScale = THREE.MathUtils.lerp(this.timeScale, targetScale, rawDelta * 5);
     const dt = rawDelta * this.timeScale;

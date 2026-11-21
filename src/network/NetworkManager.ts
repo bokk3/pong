@@ -1,11 +1,24 @@
 import { Peer, DataConnection } from 'peerjs';
 import { EventBus } from '../core/EventBus';
-import { MultiplayerRole } from '../types';
-import { NetworkMessage } from './NetworkProtocol';
+import { GameModeType, LobbyRoom, MultiplayerRole } from '../types';
+import { NetworkMessage, PROTOCOL_VERSION } from './NetworkProtocol';
 
 const PEER_PREFIX = 'sp3d-';
+
+// Free public pub/sub relay used as a global room directory (no backend needed).
+// ntfy.sh rate-limits each visitor (~60 request burst, then ~1 request / 10 s), so every timer below
+// is kept well under that budget.
 const GLOBAL_ROOMS_ENDPOINT = 'https://ntfy.sh/sp3d_arcade_rooms_v1';
 const GLOBAL_ROOMS_WS = 'wss://ntfy.sh/sp3d_arcade_rooms_v1/ws';
+const ROOM_HEARTBEAT_MS = 20_000;
+const ROOM_STALE_MS = 50_000;
+const ROOM_HISTORY_WINDOW = '60s';
+
+// Edge presence counter (Cloudflare Pages Function). Kept infrequent to stay inside the free tier.
+const PRESENCE_INTERVAL_MS = 15_000;
+
+const HANDSHAKE_TIMEOUT_MS = 8_000;
+const CONNECT_TIMEOUT_MS = 9_000;
 
 const STUN_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -14,10 +27,65 @@ const STUN_SERVERS = [
   { urls: 'stun:global.stun.twilio.com:3478' }
 ];
 
+const ALLOWED_TARGET_SCORES = [5, 11, 21];
+
 export interface CandidatePeer {
   peerId: string;
   username: string;
   region?: string;
+}
+
+export interface LobbySnapshot {
+  lookingCount: number;
+  playingCount: number;
+  onlineCount: number;
+  pongGamesCount: number;
+  curveGamesCount: number;
+  rooms: LobbyRoom[];
+}
+
+interface PresenceResponse {
+  lookingCount?: number;
+  playingCount?: number;
+  onlineCount?: number;
+  pongGamesCount?: number;
+  curveGamesCount?: number;
+  candidates?: CandidatePeer[];
+  rooms?: unknown[];
+}
+
+function clampText(value: unknown, fallback: string, max: number): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return (text || fallback).slice(0, max);
+}
+
+/**
+ * Rooms come from a public relay that anyone can post to, so every field is validated and coerced
+ * before it can reach the DOM.
+ */
+export function sanitizeRoom(raw: unknown, now: number = Date.now()): LobbyRoom | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const roomId = typeof r.roomId === 'string' ? r.roomId.toLowerCase() : '';
+  if (!/^sp3d-[a-z0-9]{3,16}$/.test(roomId)) return null;
+
+  const gameMode: GameModeType = r.gameMode === 'CURVE' ? 'CURVE' : 'PONG';
+  const rawTarget = Number(r.targetScore);
+  const targetScore = ALLOWED_TARGET_SCORES.includes(rawTarget) ? rawTarget : (gameMode === 'CURVE' ? 5 : 11);
+  const playerCount = Number(r.playerCount) >= 2 ? 2 : 1;
+  const createdAt = Number.isFinite(Number(r.createdAt ?? r.timestamp)) ? Number(r.createdAt ?? r.timestamp) : now;
+
+  return {
+    roomId,
+    roomName: clampText(r.roomName, 'Arena', 32),
+    hostName: clampText(r.hostName, 'Player', 16),
+    gameMode,
+    status: r.status === 'playing' ? 'playing' : 'waiting',
+    targetScore,
+    playerCount,
+    createdAt,
+    isQuickMatch: r.isQuickMatch === true
+  };
 }
 
 export class NetworkManager {
@@ -30,7 +98,7 @@ export class NetworkManager {
   public localUsername: string = 'Player';
   public remoteUsername: string = 'Opponent';
   public hostedTargetScore: number = 11;
-  public activeGameMode: 'PONG' | 'CURVE' = 'PONG';
+  public activeGameMode: GameModeType = 'PONG';
   public hostedRoomId: string | null = null;
 
   public isConnected: boolean = false;
@@ -39,8 +107,10 @@ export class NetworkManager {
   private pingInterval: number | null = null;
   private presenceInterval: number | null = null;
   private roomHeartbeatTimer: number | null = null;
+  private handshakeTimer: number | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private isHandshakeComplete: boolean = false;
+  private readonly anonPresenceId = `${PEER_PREFIX}anon${Math.random().toString(36).substring(2, 9)}`;
 
   public onMessageReceived: ((msg: NetworkMessage) => void) | null = null;
 
@@ -49,6 +119,14 @@ export class NetworkManager {
     this.loadSavedUsername();
     this.setupBroadcastChannel();
     this.startPresenceReporting();
+
+    window.addEventListener('pagehide', () => {
+      // Best effort: take our room off the public list right away
+      if (this.hostedRoomId) {
+        const body = JSON.stringify({ action: 'ROOM_CLOSED', roomId: this.hostedRoomId });
+        navigator.sendBeacon?.(GLOBAL_ROOMS_ENDPOINT, body);
+      }
+    });
   }
 
   public static get(): NetworkManager {
@@ -59,7 +137,12 @@ export class NetworkManager {
   }
 
   private loadSavedUsername(): void {
-    const saved = localStorage.getItem('spinpong_username');
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem('spinpong_username');
+    } catch {
+      // storage unavailable (private mode, blocked cookies)
+    }
     if (saved && saved.trim().length > 0) {
       this.localUsername = saved.trim().slice(0, 14);
     } else {
@@ -67,38 +150,38 @@ export class NetworkManager {
       const nouns = ['Master', 'Ace', 'Paddle', 'Striker', 'Hero', 'Wizard', 'King'];
       const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
       const noun = nouns[Math.floor(Math.random() * nouns.length)];
-      this.localUsername = `${adj}${noun}`;
-      localStorage.setItem('spinpong_username', this.localUsername);
+      this.setUsername(`${adj}${noun}`);
     }
   }
 
   public setUsername(name: string): void {
     if (!name || name.trim().length === 0) return;
     this.localUsername = name.trim().slice(0, 14);
-    localStorage.setItem('spinpong_username', this.localUsername);
+    try {
+      localStorage.setItem('spinpong_username', this.localUsername);
+    } catch {
+      // ignore
+    }
   }
 
+  // --- Same-browser multi-tab matchmaking (handy for local testing) ---
   private setupBroadcastChannel(): void {
-    if (typeof BroadcastChannel !== 'undefined') {
-      try {
-        this.broadcastChannel = new BroadcastChannel('spinpong_p2p_channel');
-        this.broadcastChannel.onmessage = async (event) => {
-          const data = event.data;
-          if (data?.type === 'SEARCHING' && this.isSearching && !this.isConnected && this.peer?.open) {
-            const remotePeerId = data.peerId as string;
-            // Avoid connecting to self
-            if (remotePeerId && remotePeerId !== this.peer.id) {
-              // Tie-breaker: lexicographically greater peerId initiates the connection as CLIENT
-              if (this.peer.id > remotePeerId) {
-                console.log('[NetworkManager] Multi-tab local peer found:', remotePeerId);
-                await this.connectToPeer(remotePeerId);
-              }
-            }
-          }
-        };
-      } catch (err) {
-        console.warn('[NetworkManager] BroadcastChannel not supported:', err);
-      }
+    if (typeof BroadcastChannel === 'undefined') return;
+    try {
+      this.broadcastChannel = new BroadcastChannel('spinpong_p2p_channel');
+      this.broadcastChannel.onmessage = async (event) => {
+        const data = event.data as { type?: string; peerId?: string; gameMode?: GameModeType } | null;
+        if (data?.type !== 'SEARCHING' || !this.isSearching || this.isConnected || !this.peer?.open) return;
+        const remotePeerId = data.peerId;
+        if (!remotePeerId || remotePeerId === this.peer.id) return;
+        if (data.gameMode && data.gameMode !== this.activeGameMode) return;
+        // Tie-breaker: the lexicographically greater peer initiates the connection as CLIENT
+        if (this.peer.id > remotePeerId) {
+          await this.connectToPeer(remotePeerId);
+        }
+      };
+    } catch {
+      this.broadcastChannel = null;
     }
   }
 
@@ -107,17 +190,18 @@ export class NetworkManager {
       this.broadcastChannel.postMessage({
         type: 'SEARCHING',
         peerId: this.peer.id,
-        username: this.localUsername
+        username: this.localUsername,
+        gameMode: this.activeGameMode
       });
     }
   }
 
+  // --- Peer lifecycle ---
   public async initPeer(customRoomId?: string): Promise<string> {
-    const cleanCustom = customRoomId 
+    const cleanCustom = customRoomId
       ? customRoomId.trim().toLowerCase().replace(PEER_PREFIX, '').replace(/[^a-z0-9]/g, '')
       : undefined;
 
-    // If peer is already open and valid
     if (this.peer && !this.peer.destroyed && this.peer.open) {
       const currentClean = this.peer.id.replace(PEER_PREFIX, '');
       if (!cleanCustom || currentClean === cleanCustom) {
@@ -127,42 +211,56 @@ export class NetworkManager {
       this.peer = null;
     }
 
+    // A peer that lost its signalling connection can usually be revived without a new ID
+    if (this.peer && !this.peer.destroyed && this.peer.disconnected) {
+      this.peer.destroy();
+      this.peer = null;
+    }
+
     return new Promise((resolve, reject) => {
-      const generatedId = cleanCustom 
-        ? `${PEER_PREFIX}${cleanCustom}` 
+      const generatedId = cleanCustom
+        ? `${PEER_PREFIX}${cleanCustom}`
         : `${PEER_PREFIX}${Math.random().toString(36).substring(2, 7)}`;
 
-      this.peer = new Peer(generatedId, {
+      const peer = new Peer(generatedId, {
         config: { iceServers: STUN_SERVERS },
         debug: 0
       });
+      this.peer = peer;
 
-      this.peer.on('open', (id) => {
-        this.setupIncomingConnectionHandler();
-        const cleanId = id.replace(PEER_PREFIX, '');
-        resolve(cleanId);
+      peer.on('open', (id) => {
+        this.setupIncomingConnectionHandler(peer);
+        resolve(id.replace(PEER_PREFIX, ''));
       });
 
-      this.peer.on('error', (err: Error & { type?: string }) => {
-        console.warn('[NetworkManager] Peer error:', err);
+      peer.on('disconnected', () => {
+        // Lost the signalling server (not the opponent). Try to come back with the same ID.
+        if (!peer.destroyed) {
+          try { peer.reconnect(); } catch { /* ignore */ }
+        }
+      });
+
+      peer.on('error', (err: Error & { type?: string }) => {
         if (err.type === 'unavailable-id') {
-          // Retry with random ID if collision
-          this.peer?.destroy();
-          this.peer = null;
+          // Retry with a random ID on collision
+          peer.destroy();
+          if (this.peer === peer) this.peer = null;
           this.initPeer().then(resolve).catch(reject);
-        } else {
+        } else if (err.type === 'peer-unavailable') {
+          // Raised when connecting to a room that no longer exists; handled by connectToPeer's timeout
+        } else if (!peer.open) {
           reject(err);
+        } else {
+          console.warn('[Network] Peer error:', err.type ?? err.message);
         }
       });
     });
   }
 
-  private setupIncomingConnectionHandler(): void {
-    if (!this.peer) return;
-
-    this.peer.on('connection', (incomingConn) => {
-      if (this.isConnected) {
-        incomingConn.close();
+  private setupIncomingConnectionHandler(peer: Peer): void {
+    peer.on('connection', (incomingConn) => {
+      if (this.isConnected || this.conn) {
+        incomingConn.on('open', () => incomingConn.close());
         return;
       }
       this.role = 'HOST';
@@ -176,31 +274,30 @@ export class NetworkManager {
     if (!cleanRoomId) return false;
     const targetPeerId = `${PEER_PREFIX}${cleanRoomId}`;
 
-    await this.initPeer();
+    try {
+      await this.initPeer();
+    } catch {
+      return false;
+    }
     if (!this.peer || !this.peer.open) return false;
-
-    // Do not connect to self
     if (this.peer.id === targetPeerId) return false;
 
     if (this.conn) {
-      try { this.conn.close(); } catch {}
+      try { this.conn.close(); } catch { /* ignore */ }
       this.conn = null;
     }
 
     return new Promise((resolve) => {
-      const outgoing = this.peer!.connect(targetPeerId, {
-        reliable: true
-      });
-
+      const outgoing = this.peer!.connect(targetPeerId, { reliable: true });
       this.role = 'CLIENT';
 
-      // 9 second timeout for mobile & home NAT traversal
-      const timeout = setTimeout(() => {
-        if (!this.isConnected) {
-          try { outgoing.close(); } catch {}
+      // Generous timeout for mobile & home NAT traversal
+      const timeout = window.setTimeout(() => {
+        if (!outgoing.open) {
+          try { outgoing.close(); } catch { /* ignore */ }
           resolve(false);
         }
-      }, 9000);
+      }, CONNECT_TIMEOUT_MS);
 
       outgoing.on('open', () => {
         clearTimeout(timeout);
@@ -224,25 +321,22 @@ export class NetworkManager {
       this.isConnected = true;
       this.startPingHeartbeat();
 
-      // Send initial handshake with game mode and target score
+      // Each side sends exactly one handshake; the match starts once the other side's arrives.
       this.send({
         type: 'HANDSHAKE',
         username: this.localUsername,
         gameMode: this.activeGameMode,
         targetScore: this.hostedTargetScore,
-        role: this.role
-      });
-
-      // Emit connected status
-      this.eventBus.emit('network:status', {
-        status: 'connected',
         role: this.role,
-        remoteUsername: this.remoteUsername,
-        gameMode: this.activeGameMode,
-        targetScore: this.hostedTargetScore
+        protocolVersion: PROTOCOL_VERSION
       });
 
-      this.reportPresence('playing');
+      this.clearHandshakeTimer();
+      this.handshakeTimer = window.setTimeout(() => {
+        if (!this.isHandshakeComplete) {
+          this.handleDisconnect('Opponent did not respond');
+        }
+      }, HANDSHAKE_TIMEOUT_MS);
     };
 
     if (conn.open) {
@@ -252,22 +346,31 @@ export class NetworkManager {
     }
 
     conn.on('data', (data: unknown) => {
+      if (conn !== this.conn) return;
       try {
-        const msg = typeof data === 'string' ? JSON.parse(data) as NetworkMessage : data as NetworkMessage;
-        this.handleMessage(msg);
-      } catch (e) {
-        console.error('[NetworkManager] Error parsing data:', e);
+        const msg = (typeof data === 'string' ? JSON.parse(data) : data) as NetworkMessage;
+        if (msg && typeof msg === 'object' && typeof msg.type === 'string') {
+          this.handleMessage(msg);
+        }
+      } catch {
+        // ignore malformed packets
       }
     });
 
     conn.on('close', () => {
-      this.handleDisconnect('Opponent disconnected');
+      if (conn === this.conn) this.handleDisconnect('Opponent disconnected');
     });
 
-    conn.on('error', (err) => {
-      console.warn('[NetworkManager] Connection error:', err);
-      this.handleDisconnect('Connection error');
+    conn.on('error', () => {
+      if (conn === this.conn) this.handleDisconnect('Connection error');
     });
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this.handshakeTimer !== null) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
   }
 
   private handleMessage(msg: NetworkMessage): void {
@@ -277,40 +380,34 @@ export class NetworkManager {
     }
 
     if (msg.type === 'PONG') {
-      const now = performance.now();
-      const rtt = Math.max(1, Math.round(now - msg.timestamp));
-      this.pingMs = rtt;
+      this.pingMs = Math.max(1, Math.round(performance.now() - msg.timestamp));
       this.eventBus.emit('network:ping', { pingMs: this.pingMs });
       return;
     }
 
     if (msg.type === 'HANDSHAKE') {
-      this.isConnected = true;
-      if (!this.pingInterval) {
-        this.startPingHeartbeat();
-      }
-      this.remoteUsername = msg.username || 'Opponent';
+      if (this.isHandshakeComplete) return;
 
-      // Synchronize game mode and target score from HOST to CLIENT
+      if (msg.protocolVersion !== PROTOCOL_VERSION) {
+        this.handleDisconnect('Version mismatch — refresh the page to update the game');
+        return;
+      }
+
+      this.isHandshakeComplete = true;
+      this.clearHandshakeTimer();
+      this.remoteUsername = clampText(msg.username, 'Opponent', 14);
+
+      // The HOST decides game mode and target score
       if (this.role === 'CLIENT') {
-        if (msg.gameMode) {
+        if (msg.gameMode === 'PONG' || msg.gameMode === 'CURVE') {
           this.activeGameMode = msg.gameMode;
         }
-        if (msg.targetScore) {
+        if (msg.targetScore && ALLOWED_TARGET_SCORES.includes(msg.targetScore)) {
           this.hostedTargetScore = msg.targetScore;
         }
-      }
-
-      if (!this.isHandshakeComplete) {
-        this.isHandshakeComplete = true;
-        // Reply with local metadata
-        this.send({
-          type: 'HANDSHAKE',
-          username: this.localUsername,
-          gameMode: this.activeGameMode,
-          targetScore: this.hostedTargetScore,
-          role: this.role
-        });
+      } else if (this.hostedRoomId) {
+        // Our room is now full; take it off the public list
+        void this.closeLobbyRoom();
       }
 
       this.eventBus.emit('network:status', {
@@ -320,11 +417,16 @@ export class NetworkManager {
         gameMode: this.activeGameMode,
         targetScore: this.hostedTargetScore
       });
+      this.reportPresence('playing');
       return;
     }
 
+    // Ignore gameplay packets until both sides agreed on the match setup
+    if (!this.isHandshakeComplete) return;
+
     if (msg.type === 'REMATCH_REQUEST') {
       this.eventBus.emit('multiplayer:rematch', { from: 'remote', status: msg.status });
+      return;
     }
 
     if (this.onMessageReceived) {
@@ -336,8 +438,8 @@ export class NetworkManager {
     if (this.conn && this.conn.open) {
       try {
         this.conn.send(JSON.stringify(msg));
-      } catch (e) {
-        console.warn('[NetworkManager] Error sending packet:', e);
+      } catch {
+        // channel closing; the close handler will clean up
       }
     }
   }
@@ -359,60 +461,105 @@ export class NetworkManager {
   }
 
   public handleDisconnect(reason: string = 'Disconnected'): void {
+    const wasActive = this.isConnected || this.conn !== null;
     this.isConnected = false;
     this.isSearching = false;
     this.isHandshakeComplete = false;
+    this.clearHandshakeTimer();
     this.stopPingHeartbeat();
-    if (this.roomHeartbeatTimer) {
-      clearInterval(this.roomHeartbeatTimer);
-      this.roomHeartbeatTimer = null;
-    }
     if (this.conn) {
-      try { this.conn.close(); } catch {}
+      const conn = this.conn;
       this.conn = null;
+      try { conn.close(); } catch { /* ignore */ }
     }
 
-    this.eventBus.emit('network:status', {
-      status: 'disconnected',
-      message: reason
-    });
+    if (wasActive) {
+      this.eventBus.emit('network:status', {
+        status: 'disconnected',
+        message: reason
+      });
+    }
 
     this.reportPresence('menu');
   }
 
   public disconnect(): void {
+    void this.closeLobbyRoom();
     this.handleDisconnect('User left match');
   }
 
+  // --- Quick Match (built on the global room directory) ---
+
   /**
-   * Sequentially probes candidates to establish connection with available challenger.
+   * Joins the oldest open room for `gameMode`, or hosts a quick-match room and keeps looking.
+   * Resolves once connected or when `isCancelled()` turns true.
    */
-  public async findBestCandidateMatch(candidates: Array<{ peerId: string; username: string }>): Promise<string | null> {
-    if (!candidates || candidates.length === 0) return null;
+  public async quickMatch(
+    gameMode: GameModeType,
+    onStatus: (title: string, sub: string) => void,
+    isCancelled: () => boolean
+  ): Promise<void> {
+    this.isSearching = true;
+    this.activeGameMode = gameMode;
+    this.hostedTargetScore = gameMode === 'CURVE' ? 5 : 11;
 
-    for (const candidate of candidates) {
-      const cleanId = candidate.peerId.replace(PEER_PREFIX, '');
-      if (this.peer && cleanId === this.peer.id.replace(PEER_PREFIX, '')) {
-        continue;
-      }
-
-      console.log('[NetworkManager] Attempting connection to candidate:', cleanId);
-      const connected = await this.connectToPeer(cleanId);
-      if (connected) {
-        console.log('[NetworkManager] Successfully connected to candidate:', cleanId);
-        return cleanId;
-      }
+    onStatus('Connecting to P2P network...', 'Getting a room code...');
+    let myId: string;
+    try {
+      myId = `${PEER_PREFIX}${await this.initPeer()}`;
+    } catch {
+      onStatus('Could not reach the matchmaking server', 'Check your connection and try again.');
+      this.isSearching = false;
+      return;
     }
 
-    return null;
+    const tryJoinOpenRooms = async (onlyOlderThan?: number): Promise<boolean> => {
+      const { rooms } = await this.fetchLobbyRooms();
+      const open = rooms
+        .filter(r => r.status === 'waiting' && r.gameMode === gameMode && r.roomId !== myId)
+        .filter(r => onlyOlderThan === undefined || r.createdAt < onlyOlderThan || (r.createdAt === onlyOlderThan && r.roomId < myId))
+        .sort((a, b) => Number(b.isQuickMatch) - Number(a.isQuickMatch) || a.createdAt - b.createdAt)
+        .slice(0, 3);
+
+      for (const room of open) {
+        if (isCancelled() || this.isConnected) return this.isConnected;
+        onStatus('Opponent found!', `Connecting to ${room.hostName}...`);
+        const wasHosting = this.hostedRoomId !== null;
+        if (wasHosting) await this.closeLobbyRoom();
+        if (await this.connectToPeer(room.roomId)) return true;
+        if (wasHosting && !isCancelled()) {
+          await this.createLobbyRoom(gameMode, `${this.localUsername}'s Quick Match`, undefined, true);
+        }
+      }
+      return false;
+    };
+
+    onStatus('Scanning for opponents...', 'Looking for open rooms...');
+    this.broadcastLocalSearch();
+    if (await tryJoinOpenRooms()) return;
+    if (isCancelled()) return;
+
+    // Nobody waiting: host a public quick-match room and keep looking
+    await this.createLobbyRoom(gameMode, `${this.localUsername}'s Quick Match`, undefined, true);
+    const myCreatedAt = this.hostedRoomCreatedAt;
+    onStatus('Waiting for a challenger...', `Hosting room ${myId.replace(PEER_PREFIX, '').toUpperCase()} · it is listed in the public lobby`);
+
+    while (!isCancelled() && !this.isConnected) {
+      await new Promise(r => window.setTimeout(r, 10_000));
+      if (isCancelled() || this.isConnected) break;
+      this.broadcastLocalSearch();
+      // If someone else is also waiting, the newer room joins the older one so the two don't wait forever
+      if (await tryJoinOpenRooms(myCreatedAt)) return;
+    }
   }
 
-  // --- Presence & Queue Heartbeats ---
+  // --- Presence (online counter) ---
   private startPresenceReporting(): void {
     this.reportPresence('menu');
     this.presenceInterval = window.setInterval(() => {
+      if (document.hidden) return;
       this.reportPresence(this.isConnected ? 'playing' : (this.isSearching ? 'searching' : 'menu'));
-    }, 6000);
+    }, PRESENCE_INTERVAL_MS);
   }
 
   public stopPresenceReporting(): void {
@@ -425,23 +572,14 @@ export class NetworkManager {
   public async reportPresence(
     status: 'menu' | 'searching' | 'playing' | 'leave',
     action?: 'presence' | 'create_room' | 'update_room' | 'close_room',
-    roomData?: { roomName?: string; gameMode?: 'PONG' | 'CURVE'; targetScore?: number; roomId?: string }
-  ): Promise<{
-    lookingCount: number;
-    playingCount: number;
-    onlineCount?: number;
-    pongGamesCount?: number;
-    curveGamesCount?: number;
-    candidates: CandidatePeer[];
-    rooms?: any[];
-  } | null> {
+    roomData?: { roomName?: string; gameMode?: GameModeType; targetScore?: number; roomId?: string }
+  ): Promise<PresenceResponse | null> {
     try {
-      const peerId = this.peer?.id || `${PEER_PREFIX}anon_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch('/api/presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          peerId,
+          peerId: this.peer?.id || this.anonPresenceId,
           username: this.localUsername,
           status,
           gameMode: this.activeGameMode,
@@ -455,54 +593,56 @@ export class NetworkManager {
       });
 
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as PresenceResponse;
         this.eventBus.emit('presence:updated', {
           lookingCount: data.lookingCount || 0,
           playingCount: data.playingCount || 0,
-          onlineCount: data.onlineCount || 0,
+          onlineCount: Math.max(1, data.onlineCount || 0),
           pongGamesCount: data.pongGamesCount || 0,
-          curveGamesCount: data.curveGamesCount || 0,
-          rooms: data.rooms || []
+          curveGamesCount: data.curveGamesCount || 0
         });
         return data;
       }
     } catch {
-      this.eventBus.emit('presence:updated', {
-        lookingCount: status === 'searching' ? 1 : 0,
-        playingCount: status === 'playing' ? 1 : 0
-      });
+      // presence is best-effort
     }
     return null;
   }
 
-  public async createLobbyRoom(gameMode: 'PONG' | 'CURVE', customRoomName?: string, targetScore?: number): Promise<string> {
+  // --- Public room directory ---
+  private hostedRoomCreatedAt: number = 0;
+
+  public async createLobbyRoom(gameMode: GameModeType, customRoomName?: string, targetScore?: number, isQuickMatch: boolean = false): Promise<string> {
     const code = await this.initPeer();
     this.activeGameMode = gameMode;
-    this.hostedTargetScore = targetScore || (gameMode === 'CURVE' ? 5 : 11);
+    this.hostedTargetScore = targetScore && ALLOWED_TARGET_SCORES.includes(targetScore)
+      ? targetScore
+      : (gameMode === 'CURVE' ? 5 : 11);
     this.hostedRoomId = this.peer?.id || `${PEER_PREFIX}${code}`;
+    this.hostedRoomCreatedAt = Date.now();
 
     const manifest = {
       action: 'ROOM_ANNOUNCE',
       roomId: this.hostedRoomId,
-      roomName: customRoomName || `${this.localUsername}'s ${gameMode === 'CURVE' ? 'Curve' : 'Pong'} Arena`,
+      roomName: (customRoomName || `${this.localUsername}'s ${gameMode === 'CURVE' ? 'Curve' : 'Pong'} Arena`).slice(0, 32),
       hostName: this.localUsername,
       gameMode: this.activeGameMode,
       targetScore: this.hostedTargetScore,
       status: 'waiting',
       playerCount: 1,
+      isQuickMatch,
+      createdAt: this.hostedRoomCreatedAt,
       timestamp: Date.now()
     };
 
-    // 1. Broadcast to global cross-device relay
     await this.publishGlobalRoom(manifest);
 
-    // 2. Start 4-second heartbeat while waiting
     if (this.roomHeartbeatTimer) clearInterval(this.roomHeartbeatTimer);
     this.roomHeartbeatTimer = window.setInterval(() => {
-      if (this.hostedRoomId && !this.isConnected) {
-        this.publishGlobalRoom({ ...manifest, timestamp: Date.now() });
+      if (this.hostedRoomId === manifest.roomId && !this.isConnected) {
+        void this.publishGlobalRoom({ ...manifest, timestamp: Date.now() });
       }
-    }, 4000);
+    }, ROOM_HEARTBEAT_MS);
 
     return code;
   }
@@ -513,142 +653,130 @@ export class NetworkManager {
       this.roomHeartbeatTimer = null;
     }
     if (this.hostedRoomId) {
-      await this.publishGlobalRoom({
-        action: 'ROOM_CLOSED',
-        roomId: this.hostedRoomId
-      });
+      const roomId = this.hostedRoomId;
       this.hostedRoomId = null;
+      await this.publishGlobalRoom({ action: 'ROOM_CLOSED', roomId });
     }
   }
 
-  private async publishGlobalRoom(data: Record<string, any>): Promise<void> {
+  private async publishGlobalRoom(data: Record<string, unknown>): Promise<void> {
     try {
       await fetch(GLOBAL_ROOMS_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(data)
       });
-    } catch {}
+    } catch {
+      // relay unreachable; the edge fallback below still lists the room for same-region players
+    }
 
-    // Fallback to local /api/presence
-    this.reportPresence('searching', data.action === 'ROOM_CLOSED' ? 'close_room' : 'update_room', {
-      roomId: data.roomId,
-      roomName: data.roomName,
-      gameMode: data.gameMode,
-      targetScore: data.targetScore
+    void this.reportPresence('searching', data.action === 'ROOM_CLOSED' ? 'close_room' : 'update_room', {
+      roomId: data.roomId as string | undefined,
+      roomName: data.roomName as string | undefined,
+      gameMode: data.gameMode as GameModeType | undefined,
+      targetScore: data.targetScore as number | undefined
     });
   }
 
-  public async fetchLobbyRooms(): Promise<{ lookingCount: number; playingCount: number; onlineCount?: number; pongGamesCount?: number; curveGamesCount?: number; rooms: any[] }> {
-    const globalRoomsMap = new Map<string, any>();
+  public async fetchLobbyRooms(): Promise<LobbySnapshot> {
+    const rooms = new Map<string, LobbyRoom>();
     const now = Date.now();
 
-    // 1. Query global relay (last 30 seconds)
+    // 1. Global relay: replay recent announcements in order
     try {
-      const res = await fetch(`${GLOBAL_ROOMS_ENDPOINT}/json?poll=1&since=30s`, { cache: 'no-store' });
+      const res = await fetch(`${GLOBAL_ROOMS_ENDPOINT}/json?poll=1&since=${ROOM_HISTORY_WINDOW}`, { cache: 'no-store' });
       if (res.ok) {
         const text = await res.text();
-        const lines = text.trim().split('\n');
-        for (const line of lines) {
+        for (const line of text.split('\n')) {
           if (!line.trim()) continue;
           try {
-            const ev = JSON.parse(line);
-            if (ev.event === 'message' && ev.message) {
-              let msgData: any = null;
-              if (typeof ev.message === 'string') {
-                try {
-                  msgData = JSON.parse(ev.message);
-                } catch {}
-              } else if (typeof ev.message === 'object') {
-                msgData = ev.message;
-              }
-
-              if (msgData && msgData.action === 'ROOM_ANNOUNCE' && msgData.roomId) {
-                // Heartbeat must be within 35 seconds (server time ev.time or client timestamp)
-                const msgAge = ev.time ? (now - ev.time * 1000) : (now - (msgData.timestamp || 0));
-                if (msgAge < 35000) {
-                  globalRoomsMap.set(msgData.roomId, {
-                    roomId: msgData.roomId,
-                    roomName: msgData.roomName || 'Arena',
-                    hostName: msgData.hostName || 'Player',
-                    gameMode: msgData.gameMode || 'PONG',
-                    status: msgData.status || 'waiting',
-                    targetScore: msgData.targetScore || 11,
-                    playerCount: msgData.playerCount || 1,
-                    createdAt: msgData.timestamp || now
-                  });
-                }
-              } else if (msgData && msgData.action === 'ROOM_CLOSED' && msgData.roomId) {
-                globalRoomsMap.delete(msgData.roomId);
-              }
+            const ev = JSON.parse(line) as { event?: string; time?: number; message?: unknown };
+            if (ev.event !== 'message' || typeof ev.message !== 'string') continue;
+            const msgData = JSON.parse(ev.message) as Record<string, unknown>;
+            if (msgData.action === 'ROOM_ANNOUNCE') {
+              const age = ev.time ? now - ev.time * 1000 : now - Number(msgData.timestamp || 0);
+              const room = sanitizeRoom(msgData, now);
+              if (room && age < ROOM_STALE_MS) rooms.set(room.roomId, room);
+            } else if (msgData.action === 'ROOM_CLOSED' && typeof msgData.roomId === 'string') {
+              rooms.delete(msgData.roomId.toLowerCase());
             }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    // 2. Query fallback /api/presence
-    let localData: any = null;
-    try {
-      const res = await fetch('/api/presence', { method: 'GET' });
-      if (res.ok) {
-        localData = await res.json();
-        if (localData.rooms) {
-          for (const r of localData.rooms) {
-            if (!globalRoomsMap.has(r.roomId)) {
-              globalRoomsMap.set(r.roomId, r);
-            }
+          } catch {
+            // skip foreign / malformed messages on the public topic
           }
         }
       }
-    } catch {}
+    } catch {
+      // relay unreachable
+    }
 
-    const combinedRooms = Array.from(globalRoomsMap.values());
-    const lookingCount = (localData?.lookingCount || 0) + (combinedRooms.length > 0 ? combinedRooms.length : 0);
-    const playingCount = localData?.playingCount || (this.isConnected ? 1 : 0);
+    // 2. Edge fallback (/api/presence)
+    let edge: PresenceResponse | null = null;
+    try {
+      const res = await fetch('/api/presence', { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        edge = await res.json() as PresenceResponse;
+        for (const raw of edge.rooms || []) {
+          const room = sanitizeRoom(raw, now);
+          if (room && !rooms.has(room.roomId)) rooms.set(room.roomId, room);
+        }
+      }
+    } catch {
+      // ignore
+    }
 
-    const result = {
+    const roomList = Array.from(rooms.values()).sort((a, b) => b.createdAt - a.createdAt);
+    const waitingRooms = roomList.filter(r => r.status === 'waiting').length;
+    const lookingCount = Math.max(edge?.lookingCount || 0, waitingRooms);
+    const playingCount = edge?.playingCount || (this.isConnected ? 2 : 0);
+
+    const result: LobbySnapshot = {
       lookingCount,
       playingCount,
-      onlineCount: Math.max(lookingCount + playingCount, localData?.onlineCount || 1),
-      pongGamesCount: localData?.pongGamesCount || 0,
-      curveGamesCount: localData?.curveGamesCount || 0,
-      rooms: combinedRooms
+      onlineCount: Math.max(1, edge?.onlineCount || 0, lookingCount + playingCount),
+      pongGamesCount: edge?.pongGamesCount || 0,
+      curveGamesCount: edge?.curveGamesCount || 0,
+      rooms: roomList
     };
 
     this.eventBus.emit('presence:updated', result);
     return result;
   }
 
-  public subscribeToLobbyUpdates(onUpdate: (rooms: any[]) => void): () => void {
+  /** Live updates while the lobby is open. Bursts of relay messages are coalesced into one refetch. */
+  public subscribeToLobbyUpdates(onUpdate: (rooms: LobbyRoom[]) => void): () => void {
     let ws: WebSocket | null = null;
     let isDisposed = false;
+    let refetchTimer: number | null = null;
 
     try {
       ws = new WebSocket(GLOBAL_ROOMS_WS);
       ws.onmessage = (event) => {
         if (isDisposed) return;
         try {
-          const ev = JSON.parse(event.data);
-          if (ev.event === 'message' && ev.message) {
-            // Re-fetch latest snapshot on real-time room notification
+          const ev = JSON.parse(event.data as string) as { event?: string };
+          if (ev.event !== 'message' || refetchTimer !== null) return;
+          refetchTimer = window.setTimeout(() => {
+            refetchTimer = null;
+            if (isDisposed) return;
             this.fetchLobbyRooms().then(data => {
-              if (!isDisposed && data.rooms) {
-                onUpdate(data.rooms);
-              }
+              if (!isDisposed) onUpdate(data.rooms);
             });
-          }
-        } catch {}
+          }, 1500);
+        } catch {
+          // ignore
+        }
       };
-    } catch {}
+    } catch {
+      ws = null;
+    }
 
     return () => {
       isDisposed = true;
+      if (refetchTimer !== null) clearTimeout(refetchTimer);
       if (ws) {
-        try { ws.close(); } catch {}
+        try { ws.close(); } catch { /* ignore */ }
         ws = null;
       }
     };
   }
 }
-

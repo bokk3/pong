@@ -29,10 +29,88 @@ html, body {
   color: var(--text-white);
 }
 
+/* Text fields must stay selectable/editable (iOS Safari blocks typing when user-select is none) */
+input, textarea, select {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--arcade-cyan);
+  outline-offset: 2px;
+}
+
+/* ================= BOOT / FALLBACK SCREEN ================= */
+.boot-screen,
+.boot-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 40%, #14213d 0%, #050811 75%);
+  color: var(--text-white);
+  font-family: var(--font-display);
+  text-align: center;
+  transition: opacity 0.5s ease;
+}
+
+.boot-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  box-shadow: 0 8px 30px rgba(0, 210, 255, 0.35);
+  animation: bootPulse 1.4s ease-in-out infinite;
+}
+
+.boot-text {
+  max-width: 420px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: #cbd5e1;
+}
+
+.boot-screen.boot-error .boot-logo {
+  animation: none;
+  filter: grayscale(0.6);
+}
+
+.boot-screen.boot-error .boot-text {
+  color: #fecaca;
+}
+
+.boot-screen.boot-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes bootPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 #game-container {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   touch-action: none;
 }
@@ -292,6 +370,18 @@ html, body {
   right: 24px;
   z-index: 30;
   pointer-events: auto;
+  display: flex;
+  gap: 10px;
+}
+
+.hud-pause-btn {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -1px;
+}
+
+.hud-corner-btn.hud-pause-btn:hover {
+  transform: scale(1.1);
 }
 
 .hud-corner-btn {

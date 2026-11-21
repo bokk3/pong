@@ -1,0 +1,17 @@
+{
+  "name": "Spin Pong 3D",
+  "short_name": "Spin Pong",
+  "description": "Arcade 3D table tennis with real spin physics, plus a trail-survival duel mode. Play the bot or a friend online.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0a1128",
+  "theme_color": "#0a1128",
+  "categories": ["games", "sports", "entertainment"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

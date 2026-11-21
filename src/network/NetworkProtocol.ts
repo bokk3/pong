@@ -1,12 +1,16 @@
 import { MatchScore, PlayerId, ShotRating, SpinType } from '../types';
 
+/**
+ * Bump whenever packet shapes or game-flow semantics change. Peers with a different version refuse to
+ * play each other (e.g. an old cached tab connecting to a freshly deployed one).
+ */
+export const PROTOCOL_VERSION = 2;
+
 export type NetworkMessageType =
   | 'HANDSHAKE'
   | 'PADDLE_MOVE'
   | 'BALL_HIT'
   | 'BALL_SYNC'
-  | 'SERVE_START'
-  | 'SCORE_SYNC'
   | 'POINT_SCORED'
   | 'REMATCH_REQUEST'
   | 'PING'
@@ -22,6 +26,7 @@ export interface HandshakeMessage {
   gameMode?: 'PONG' | 'CURVE';
   targetScore?: number;
   role?: 'HOST' | 'CLIENT';
+  protocolVersion?: number;
 }
 
 export interface PaddleMoveMessage {
@@ -45,23 +50,12 @@ export interface BallHitMessage {
   spinType: SpinType;
 }
 
-export interface ServeStartMessage {
-  type: 'SERVE_START';
-  server: PlayerId;
-  position: [number, number, number];
-  velocity: [number, number, number];
-  spin: [number, number, number];
-}
-
-export interface ScoreSyncMessage {
-  type: 'SCORE_SYNC';
-  score: MatchScore;
-}
-
+/** Host → client. `winner` and `score` are from the HOST's perspective; the client inverts them. */
 export interface PointScoredMessage {
   type: 'POINT_SCORED';
   winner: PlayerId;
   reason: string;
+  score: MatchScore;
 }
 
 export interface RematchMessage {
@@ -122,8 +116,6 @@ export type NetworkMessage =
   | PaddleMoveMessage
   | BallHitMessage
   | BallSyncMessage
-  | ServeStartMessage
-  | ScoreSyncMessage
   | PointScoredMessage
   | RematchMessage
   | PingMessage

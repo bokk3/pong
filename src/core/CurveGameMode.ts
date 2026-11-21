@@ -64,7 +64,7 @@ export class CurveGameMode {
     gridHelper.position.y = 0.042;
     this.group.add(gridHelper);
 
-    // 3. Glowing outer boundary walls (classic Achtung border)
+    // 3. Glowing outer boundary walls (arena border)
     const borderMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     const wallThick = 0.025;
     const wallHeight = 0.06;
@@ -91,14 +91,36 @@ export class CurveGameMode {
     this.group.add(wallRight);
   }
 
-  public startMatch(isMultiplayer: boolean, difficulty: 'novice' | 'pro' | 'master' = 'pro'): void {
+  /**
+   * Internally p1 is always the HOST (or the local player vs the bot) and p2 the CLIENT (or the bot);
+   * `score.player` / `score.cpu` belong to p1 / p2. Events are converted to the local point of view
+   * so the HUD always shows "you" on the left.
+   */
+  private get localIsP1(): boolean {
+    return !this.isMultiplayer || this.network.role === 'HOST';
+  }
+
+  private toLocal(id: PlayerId): PlayerId {
+    if (this.localIsP1) return id;
+    return id === 'PLAYER' ? 'CPU' : 'PLAYER';
+  }
+
+  private localScore(): CurveScore {
+    if (this.localIsP1) return { ...this.score };
+    return { player: this.score.cpu, cpu: this.score.player, targetScore: this.score.targetScore };
+  }
+
+  public startMatch(isMultiplayer: boolean, difficulty: 'novice' | 'pro' | 'master' = 'pro', targetScore: number = 5): void {
     this.isMultiplayer = isMultiplayer;
-    this.score = { player: 0, cpu: 0, targetScore: 5 };
+    this.score = { player: 0, cpu: 0, targetScore: Math.max(1, targetScore) };
     this.roundNumber = 1;
+    this.roundState = 'COUNTDOWN';
     this.p2.isBot = !isMultiplayer;
     this.p2.difficulty = difficulty;
+    this.p1.isRemote = isMultiplayer && this.network.role === 'CLIENT';
+    this.p2.isRemote = isMultiplayer && this.network.role === 'HOST';
 
-    this.eventBus.emit('curve:score', { ...this.score });
+    this.eventBus.emit('curve:score', this.localScore());
 
     if (this.isMultiplayer) {
       if (this.network.role === 'HOST') {
@@ -113,7 +135,7 @@ export class CurveGameMode {
     this.roundState = 'COUNTDOWN';
     this.countdownTimer = 2.4;
 
-    // Classic Achtung die Kurve spawn:
+    // Round spawn:
     // Random positions comfortably inside the 4.8m square (between -1.6 and 1.6), pointing in random directions
     const span = 3.0; // 3m span inside 4.8m square
     const p1X = (Math.random() - 0.5) * span;
@@ -191,17 +213,19 @@ export class CurveGameMode {
       target.steering = msg.steering;
       target.isDrawing = msg.isDrawing;
     } else if (msg.type === 'CURVE_CRASH') {
-      if (msg.victim === 'PLAYER') {
-        this.p1.isAlive = false;
-        this.handleCrash('PLAYER', msg.x, msg.z);
+      // victim uses global naming: PLAYER = p1 (host), CPU = p2 (client)
+      const curve = msg.victim === 'PLAYER' ? this.p1 : this.p2;
+      curve.isAlive = false;
+      if (this.network.role === 'HOST') {
+        // Client reported its own crash; the host scores it and echoes the result back
+        this.handleCrash(msg.victim, msg.x, msg.z);
       } else {
-        this.p2.isAlive = false;
-        this.handleCrash('CPU', msg.x, msg.z);
+        this.applyCrash(msg.victim, msg.x, msg.z);
       }
     } else if (msg.type === 'CURVE_SCORE_SYNC') {
       this.score.player = msg.player;
       this.score.cpu = msg.cpu;
-      this.eventBus.emit('curve:score', { ...this.score });
+      this.eventBus.emit('curve:score', this.localScore());
     }
   }
 
@@ -230,11 +254,18 @@ export class CurveGameMode {
       const p1Crashed = this.p1.update(dt, this.p2.trail, p2State);
       const p2Crashed = this.p2.update(dt, this.p1.trail, p1State);
 
-      if (p1Crashed) {
-        this.handleCrash('PLAYER', this.p1.x, this.p1.z);
-      }
-      if (p2Crashed) {
-        this.handleCrash('CPU', this.p2.x, this.p2.z);
+      if (this.isMultiplayer && this.network.role === 'CLIENT') {
+        // The client only reports its own crash; the host decides the round
+        if (p2Crashed) {
+          this.network.send({ type: 'CURVE_CRASH', victim: 'CPU', x: this.p2.x, z: this.p2.z });
+        }
+      } else {
+        if (p1Crashed) {
+          this.handleCrash('PLAYER', this.p1.x, this.p1.z);
+        }
+        if (p2Crashed) {
+          this.handleCrash('CPU', this.p2.x, this.p2.z);
+        }
       }
 
 
@@ -262,7 +293,7 @@ export class CurveGameMode {
         if (this.score.player >= this.score.targetScore || this.score.cpu >= this.score.targetScore) {
           this.roundState = 'MATCH_OVER';
           const winner: PlayerId = this.score.player >= this.score.targetScore ? 'PLAYER' : 'CPU';
-          this.eventBus.emit('curve:match_over', { winner, score: { ...this.score } });
+          this.eventBus.emit('curve:match_over', { winner: this.toLocal(winner), score: this.localScore() });
         } else {
           this.roundNumber++;
           if (this.isMultiplayer) {
@@ -277,39 +308,42 @@ export class CurveGameMode {
     }
   }
 
+  /** Authoritative crash handling (single player, or the host in multiplayer). `victim` uses global naming. */
   private handleCrash(victim: PlayerId, x: number, z: number): void {
     if (this.roundState !== 'PLAYING') return;
 
-    this.sound.playPaddleHit(1.0, true);
-    this.eventBus.emit('camera:shake', { intensity: 0.08, duration: 0.25 });
-
-    this.eventBus.emit('curve:crash', { victim, x, z });
-
-    // Surviving player gets point
+    // Surviving player gets the point
     if (victim === 'PLAYER') {
       this.score.cpu++;
     } else {
       this.score.player++;
     }
 
-    this.roundState = 'ROUND_OVER';
-    this.roundOverDelay = 2.0;
-
-    this.eventBus.emit('curve:score', { ...this.score });
-
-    // Sync crash and score to peer if host
+    // Send the score first so the client already has it when the crash message ends its round
     if (this.isMultiplayer && this.network.isConnected) {
+      this.network.send({
+        type: 'CURVE_SCORE_SYNC',
+        player: this.score.player,
+        cpu: this.score.cpu
+      });
       const crashMsg: CurveCrashMessage = { type: 'CURVE_CRASH', victim, x, z };
       this.network.send(crashMsg);
-
-      if (this.network.role === 'HOST') {
-        this.network.send({
-          type: 'CURVE_SCORE_SYNC',
-          player: this.score.player,
-          cpu: this.score.cpu
-        });
-      }
     }
+
+    this.applyCrash(victim, x, z);
+    this.eventBus.emit('curve:score', this.localScore());
+  }
+
+  /** Presentation and round-state side of a crash (runs on every peer). */
+  private applyCrash(victim: PlayerId, x: number, z: number): void {
+    if (this.roundState !== 'PLAYING') return;
+
+    this.sound.playPaddleHit(1.0, true);
+    this.eventBus.emit('camera:shake', { intensity: 0.08, duration: 0.25 });
+    this.eventBus.emit('curve:crash', { victim: this.toLocal(victim), x, z });
+
+    this.roundState = 'ROUND_OVER';
+    this.roundOverDelay = 2.0;
   }
 
   public dispose(): void {

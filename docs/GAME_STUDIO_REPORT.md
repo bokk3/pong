@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary & Studio Mission
 
-This report documents the architectural, engineering, and product decisions behind the design and deployment of **Spin Pong 3D** (an arcade table tennis simulation with real-time Magnus effect aerodynamics and computer vision controls) and its companion mode, **Curve Battle** (a fast-paced, multi-agent 2D Achtung die Kurve survival experience).
+This report documents the architectural, engineering, and product decisions behind the design and deployment of **Spin Pong 3D** (an arcade table tennis simulation with real-time Magnus effect aerodynamics and computer vision controls) and its companion mode, **Curve Battle** (a fast-paced, multi-agent 2D trail-survival experience).
 
 ### Key Constraints & Milestones
 - **Hosting & Infrastructure Budget**: **$0 / month** continuous operating cost.
@@ -45,7 +45,7 @@ Traditional Pong games use basic raycasts or axis-aligned bounce vectors. For Sp
    - Table surface impacts resolve normal restitution ($e_y \approx 0.88$) and tangential spin-to-velocity conversion ($v_x' = v_x + r \cdot \omega_z \cdot \mu$), causing heavy topspin balls to kick forward sharply off the bounce and side-spin balls to slide laterally.
    - Paddle collisions evaluate swing speed, contact vector offset from paddle center, and active swing angle bias, granting players intentional direction control without relying on RNG.
 
-### 2.2 Curve Battle: Achtung die Kurve 2D Canvas Dynamics
+### 2.2 Curve Battle: 2D Trail-Survival Dynamics
 Curve Battle (`CurveGameMode.ts`) introduces spatial-denial line drawing where each player's trailing ribbon becomes a solid wall for both players.
 
 - **Ribbon Geometry**: Built using dynamic `BufferGeometry` with pre-allocated vertex arrays (`MAX_VERTICES = 15000`) rather than instantiating individual meshes, eliminating GC stutter and keeping draw calls at 1 per trail.

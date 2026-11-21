@@ -1,126 +1,94 @@
-# 🏓 Spin Pong 3D — Arcade Table Tennis
+# 🏓 Spin Pong 3D
 
-A fast-paced **3D browser table tennis game** built with Three.js and TypeScript. Features arcade-style physics, an AI opponent, real-time webcam hand-swipe controls (beta), and zero external assets — everything is synthesized at runtime.
+**Arcade table tennis in your browser.** Real topspin and backspin physics, three bot levels, a fast trail-survival duel mode, and peer-to-peer online matches. No install, no sign-up, no ads.
 
----
+**▶ Play now: [pong-ay5.pages.dev](https://pong-ay5.pages.dev/)**
 
-## ✨ Features
-
-- **Authentic Physics** — 120 Hz fixed-step integrator with gravity, aerodynamic drag, and Magnus spin effects (topspin / backspin / sidespin)
-- **Smart AI** — Three difficulty levels: Novice, Pro, Champion
-- **Snappy Controls** — 140 ms input buffer, configurable sensitivity (0.5×–2.5×), adaptive flick threshold
-- **🎥 Webcam Beta Mode** — Swipe your hand in front of your camera to hit the ball using frame-differencing motion detection
-- **Arcade VFX** — Dynamic chase camera, FOV punch on impact, speed trails, bounce rings, slow-motion match points
-- **Floating Accolades** — "NICE SHOT!", "PERFECT!", "ACE!" pop up at key moments
-- **Synthesized Audio** — Web Audio API: ball impacts, table bounces, net hits, crowd ambience — no audio files needed
-- **ITTF Rules** — Proper 11-point scoring, deuce, serve rotation every 2 points, service bounce validation
+![Spin Pong 3D](public/og-image.jpg)
 
 ---
 
-## 🚀 Getting Started
+## Game modes
 
-### Prerequisites
+| Mode | What it is |
+|---|---|
+| **Classic Pong** | 3D table tennis on a regulation-size table. Serve rules, double-bounce faults, deuce and serve rotation are all enforced. Games go to 11 by default (5 or 21 in custom rooms), and you must win by 2. |
+| **Curve Battle** | Top-down survival duel. Steer a line that leaves a solid trail behind it, slip through the gaps that open in trails, and box your opponent in. First to 5 rounds by default. |
 
-- **Node.js** v18 or later
-- **npm** v9 or later
+Both modes can be played against the bot (**Novice / Pro / Champion**) or online against another person.
 
-### Install & Run
+## Playing online
+
+Everything is peer-to-peer (WebRTC), so there is no game server and no account:
+
+- **Quick Match**: joins the oldest open room for your chosen mode, or opens one and waits for a challenger.
+- **Public Lobbies**: browse open rooms, or host your own with a name, mode and score target.
+- **Private Room**: get a 5-letter code or invite link to send to a friend.
+
+The host's browser referees the match (points, crashes, rounds), and the other player's game follows it, so both screens always agree on the score.
+
+## Controls
+
+| Action | Mouse / touchpad | Keyboard | Touch |
+|---|---|---|---|
+| Move paddle | Move the mouse | `A` `D` / `←` `→` (step in/out: `W` `S` / `↑` `↓`) | Slide your finger |
+| Swing / serve | Click or flick | `Space` | Tap |
+| Topspin | Flick up | `J` (or hold `Z` + `Space`) | Swipe up |
+| Backspin slice | Flick down | `K` (or hold `X` + `Space`) | Swipe down |
+| Power smash | — | `L` | — |
+| Pause | ❚❚ button | `Esc` | ❚❚ button |
+| **Curve Battle:** turn | — | `A` / `←`, `D` / `→` | Left / right halves of the screen |
+
+Paddle sensitivity can be tuned in the menu or the ⚙️ in-game settings. There is also an experimental **webcam mode** (beta) that tracks your hand: swipe up for topspin and down for slice. Video never leaves your device.
+
+---
+
+## Development
+
+Requires **Node.js 18+**.
 
 ```bash
-# Install dependencies
 npm install
-
-# Start the development server
-npm run dev
+npm run dev        # http://localhost:3000 (includes a local stand-in for the presence API)
+npm run build      # typecheck + production bundle in dist/
+npm run preview    # serve the production build locally
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+To test multiplayer locally, open the game in two tabs of the same browser and press **Quick Match** in both with the same mode selected.
 
-### Production Build
+### Tech
 
-```bash
-npm run build
-```
+- **TypeScript** (strict) + **Vite**, no framework
+- **Three.js** for rendering, all meshes procedural
+- **Custom physics**: fixed-step integrator with gravity, drag and Magnus force
+- **Web Audio API**: every sound is synthesized at runtime, with no audio files
+- **PeerJS / WebRTC** data channels for online play
+- **[ntfy.sh](https://ntfy.sh)** public pub/sub as a free global room directory, plus a small **Cloudflare Pages Function** (`functions/api/presence.ts`) for the "players online" counter
 
-Output goes to `dist/`. Serve it with any static file server.
-
----
-
-## 🎮 Controls
-
-| Action | Input |
-|--------|-------|
-| Move paddle left / right | `←` / `→` Arrow Keys |
-| Move paddle forward / back | `↑` / `↓` Arrow Keys |
-| **Hit / Swing** | `Space` |
-| Apply topspin | `Z` (hold while swinging) |
-| Apply backspin | `X` (hold while swinging) |
-| Pause | `Escape` |
-
-### Sensitivity
-
-Use the **sensitivity slider** (0.5×–2.5×) in the quick-settings bar or the main menu to tune how aggressively the paddle follows your inputs. Higher values = snappier response.
-
-### 🎥 Webcam Hand-Swipe (Beta)
-
-1. Click **"WEBCAM (BETA)"** in the quick-settings bar or main menu
-2. Grant camera access when prompted
-3. **Swipe your hand** left or right in front of the camera to strike the ball — motion direction determines spin
-
-The live camera feed appears in the bottom-right PIP overlay during a match.
-
----
-
-## 🏗️ Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| 3D Rendering | [Three.js](https://threejs.org/) |
-| Language | TypeScript (strict mode) |
-| Bundler | [Vite](https://vitejs.dev/) |
-| Physics | Custom 120 Hz Euler integrator (no physics library) |
-| Audio | Web Audio API (fully synthesized) |
-| Vision | WebRTC + Canvas frame differencing |
-
----
-
-## 📁 Project Structure
+### Project layout
 
 ```
 src/
-├── main.ts                   # Entry point
-├── styles.css                # Global styles & UI theme
-├── core/
-│   ├── Game.ts               # Master coordinator
-│   ├── EventBus.ts           # Typed pub/sub event system
-│   └── StateMachine.ts       # Game state machine (ITTF rules)
-├── entities/
-│   ├── Ball.ts               # Ball mesh + spin visualisation
-│   ├── Paddle.ts             # Player & CPU paddle meshes
-│   ├── Table.ts              # ITTF regulation table
-│   └── Stadium.ts            # Arena, bleachers, crowd, lighting
-├── physics/
-│   ├── BallPhysics.ts        # Integrator: gravity, drag, Magnus, CCD
-│   └── Constants.ts          # Shared physics & game constants
-├── controllers/
-│   ├── PlayerController.ts   # Keyboard + buffered input + sensitivity
-│   ├── AIController.ts       # AI with difficulty profiles
-│   └── WebcamController.ts   # Webcam motion detection (beta)
-├── ui/
-│   └── HUD.ts                # Scoreboard, accolades, settings UI
-└── types.ts                  # Shared TypeScript interfaces & events
+├── main.ts              Boot, WebGL check, error screen
+├── core/                Game loop, Pong rules (StateMachine), Curve Battle mode, event bus
+├── entities/            Table, ball, paddles, stadium & crowd, curve trails
+├── controllers/         Player input, Pong AI, Curve bot, remote player, webcam tracking
+├── physics/             Ball integrator, constants, trajectory prediction for the AI
+├── network/             PeerJS connection, room directory, packet types
+├── ui/HUD.ts            Menus, scoreboard, lobby, matchmaking
+├── vfx/ audio/ utils/   Camera, particles, synthesized sound, device detection
+functions/api/           Cloudflare Pages Function (presence counter)
+public/                  Icons, social preview image, manifest, Cloudflare _headers
 ```
 
----
+More background on the design is in [`docs/`](docs/).
 
-## 🛠️ Development Notes
+### Deploying
 
-- Hot-module reload is enabled via Vite — changes to `src/` update instantly in the browser
-- TypeScript is checked strictly; run `npm run build` to catch type errors before deploying
-- All meshes are generated procedurally — no external 3D model files are required
+The site is built for **Cloudflare Pages**: build command `npm run build`, output directory `dist`. `public/_headers` sets the security headers and Content-Security-Policy. **Any new external host (API, CDN, WebSocket) must be added to `connect-src` there**, or browsers will block it.
 
----
+If you change network packet shapes or match flow, bump `PROTOCOL_VERSION` in `src/network/NetworkProtocol.ts`. Players on different versions then get a clear "refresh to update" message instead of a broken match.
 
-## 📝 License
+## License
 
-MIT — free to use, modify, and distribute.
+[MIT](LICENSE)

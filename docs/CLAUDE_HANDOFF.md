@@ -2,7 +2,7 @@
 
 > **Repository**: [https://github.com/bokk3/pong](https://github.com/bokk3/pong)  
 > **Live URL**: [https://pong-ay5.pages.dev/](https://pong-ay5.pages.dev/)  
-> **Current Version**: `v1.2.7`  
+> **Current Version**: `v1.3.0`  
 > **Target Platform**: Desktop & Mobile Web (cross-browser, responsive, touch + mouse + keyboard + webcam)  
 > **Budget / Hosting Constraints**: **$0 / month** continuous operating cost on Cloudflare Pages (Serverless / Static).
 
@@ -12,7 +12,7 @@
 
 Spin Pong 3D is a production-ready, client-side 3D arcade sports game featuring:
 1. **Spin Pong 3D**: Full 3D table tennis simulation built in **Three.js** with realistic aerodynamic Magnus effect physics (topspin, backspin, sidespin), procedural audio, dynamic camera shakes, spectator audience in bleachers, and support for mouse, keyboard, touch gestures, and webcam computer vision (hand tracking).
-2. **Curve Battle**: An integrated retro 2D top-down game mode inspired by *Achtung die Kurve* / *Curve Fever*. Players steer continuous colored ribbons leaving impassable wall trails with periodic gap jumps, competing for survival in a 4.8m x 4.8m arena.
+2. **Curve Battle**: An integrated retro 2D top-down game mode in the classic trail-survival genre. Players steer continuous colored ribbons leaving impassable wall trails with periodic gap jumps, competing for survival in a 4.8m x 4.8m arena.
 3. **Multiplayer System**: Serverless peer-to-peer multiplayer powered by **PeerJS** (WebRTC DataChannels) with Google & Twilio STUN servers. Features quick matchmaking, private friend room codes (5-letter alphanumeric), and a global public lobby with live room discovery via an open pub/sub relay (`ntfy.sh`) and fallback Cloudflare Pages Functions (`/api/presence`).
 
 ```mermaid
@@ -56,8 +56,10 @@ pong/
 │       └── presence.ts           # Cloudflare Pages Function: edge presence/room cache fallback
 ├── public/
 │   ├── _headers                  # Cloudflare security headers (CSP, X-Frame-Options, HSTS)
-│   ├── favicon.svg / icon.png    # Game icons and metadata
-│   └── logo.png                  # Main menu arcade logo
+│   ├── favicon.svg, icons/       # Favicons, PWA + apple-touch icons (generated from art/logo-source-1024.jpg)
+│   ├── manifest.webmanifest      # PWA manifest
+│   ├── og-image.jpg              # 1200x630 social preview
+│   └── logo.webp                 # Main menu logo
 ├── src/
 │   ├── audio/
 │   │   └── SoundEngine.ts        # Web Audio API: procedural paddle hits, bounces, whistles, cheers
@@ -125,6 +127,18 @@ pong/
 6. **Multiplayer Real-Time Sync (v1.2.7)**:
    - Fixed `RemotePlayerController`: eliminated conflicting target position lerps so remote opponent paddle tracks smoothly at 60Hz.
    - Added authoritative `BALL_SYNC` packet streaming from HOST at 30Hz with client reconciliation.
+
+---
+
+## 4b. v1.3.0 — Release Hardening
+
+- **Host-authoritative online play.** Pong: only the host judges bounces/points (`StateMachine.isAuthoritative`); it sends `POINT_SCORED` with the full score and the client applies it via `applyRemotePoint`. Each peer keeps the score from its own point of view (`PLAYER` = this device), so "my serve" is always `score.server === 'PLAYER'`. Curve: each peer detects only its *own* crash (`CurveController.isRemote`), the client reports it, the host scores and echoes `CURVE_SCORE_SYNC` + `CURVE_CRASH`; events are converted to local perspective before reaching the HUD.
+- **Handshake gating.** `network:status connected` fires only after the other side's `HANDSHAKE` arrives (so the client knows the host's mode/target before the match starts). Handshakes carry `PROTOCOL_VERSION`; mismatches disconnect with a "refresh to update" message.
+- **Quick Match** now runs on the ntfy room directory (`NetworkManager.quickMatch`): join the oldest open room for the mode, else host a quick room and re-check every 10s; when two quick rooms wait, the newer one joins the older. The old `/api/presence` candidate matching was unreliable on Cloudflare (per-isolate memory).
+- **Rate budgets.** ntfy.sh allows ~1 request/10s per visitor after a 60-request burst: room heartbeat 20s, lobby poll 15s (WebSocket provides live updates, debounced), presence POST 15s and skipped while the tab is hidden.
+- **Target score** (5/11/21) is honored in both modes; win-by-2, deuce, match-point slow-mo all derive from it.
+- **Security.** Room data from the public relay is validated (`sanitizeRoom`) before rendering; the presence function validates IDs, clamps strings, caps map sizes, and only lets a peer list/close its own room.
+- **UX.** Boot screen with WebGL-unsupported message, in-game pause button (touch users had no way to pause/quit), auto-pause when the tab is hidden, opponent-left handling, Space no longer re-clicks focused menu buttons, touch hints only on coarse-pointer devices.
 
 ---
 

@@ -12,6 +12,8 @@ export class StateMachine {
   private hasBouncedOnReceiverSide: boolean = false;
   private isServicePhase: boolean = false;
   private pointResolved: boolean = false;
+  private targetScore: number = 11;
+  private nextServeTimer: number | null = null;
 
   constructor() {
     this.eventBus = EventBus.get();
@@ -23,6 +25,7 @@ export class StateMachine {
     return {
       player: 0,
       cpu: 0,
+      targetScore: this.targetScore,
       server: 'PLAYER',
       consecutiveServes: 0,
       rallyCount: 0,
@@ -33,23 +36,66 @@ export class StateMachine {
     };
   }
 
-  public resetMatch(): void {
+  /**
+   * When false (multiplayer client), this peer never awards points itself: bounces are not judged
+   * locally and the host's POINT_SCORED messages drive the score instead.
+   */
+  public isAuthoritative: boolean = true;
+
+  public resetMatch(targetScore?: number, firstServer: PlayerId = 'PLAYER'): void {
+    if (targetScore && targetScore > 0) {
+      this.targetScore = targetScore;
+    }
+    this.cancelPendingServe();
     this.score = this.createInitialScore();
+    this.score.server = firstServer;
     this.eventBus.emit('score:updated', { ...this.score });
     this.setState('SERVE_WAIT');
   }
 
-  public syncScore(score: MatchScore): void {
-    this.score = { ...score };
-    this.eventBus.emit('score:updated', { ...this.score });
+  /** Cancels a scheduled next-serve (e.g. when leaving to the menu mid-point). */
+  public cancelPendingServe(): void {
+    if (this.nextServeTimer !== null) {
+      clearTimeout(this.nextServeTimer);
+      this.nextServeTimer = null;
+    }
   }
 
-  public applyRemotePoint(winner: PlayerId, reason: string, score: MatchScore): void {
-    this.score = { ...score };
+  /**
+   * Multiplayer client: apply a point decided by the host. `hostScore` must already be converted to
+   * this peer's perspective (PLAYER = local player). Local shot-quality stats are kept.
+   */
+  public applyRemotePoint(winner: PlayerId, reason: string, hostScore: MatchScore): void {
+    if (this.state === 'GAME_OVER') return;
+
+    const local = this.score;
+    this.score = {
+      ...hostScore,
+      totalPlayerShots: local.totalPlayerShots,
+      goodOrBetterShots: local.goodOrBetterShots,
+      smashWinners: local.smashWinners + (winner === 'PLAYER' && (reason === 'SMASH' || hostScore.rallyCount > 4) ? 1 : 0)
+    };
+    this.targetScore = this.score.targetScore;
     this.pointResolved = true;
     this.setState('POINT_SCORED');
     this.eventBus.emit('point:scored', { winner, reason });
     this.eventBus.emit('score:updated', { ...this.score });
+
+    const { player: p, cpu: c, targetScore: target } = this.score;
+    if ((p >= target || c >= target) && Math.abs(p - c) >= 2) {
+      const matchWinner: PlayerId = p > c ? 'PLAYER' : 'CPU';
+      this.setState('GAME_OVER');
+      this.eventBus.emit('match:over', { winner: matchWinner, score: { ...this.score } });
+      return;
+    }
+
+    this.cancelPendingServe();
+    this.nextServeTimer = window.setTimeout(() => {
+      this.nextServeTimer = null;
+      if (this.state === 'POINT_SCORED') {
+        this.prepareService();
+      }
+    }, 1200);
   }
 
   public setState(newState: GameState): void {
@@ -108,7 +154,7 @@ export class StateMachine {
   }
 
   private handleBallBounce(surface: 'player_table' | 'cpu_table' | 'floor' | 'net'): void {
-    if (this.state !== 'RALLY' || this.pointResolved) return;
+    if (this.state !== 'RALLY' || this.pointResolved || !this.isAuthoritative) return;
 
     if (surface === 'net') {
       // Net cord handled by physics. If in service and it lands on opponent table later, could be Let.
@@ -195,13 +241,14 @@ export class StateMachine {
     this.eventBus.emit('point:scored', { winner, reason });
     this.eventBus.emit('score:updated', { ...this.score });
 
-    // Check Match Over (11 points & win by 2)
+    // Check Match Over (target points & win by 2)
     const p = this.score.player;
     const c = this.score.cpu;
-    const isDeuce = p >= 10 && c >= 10;
+    const target = this.score.targetScore;
+    const isDeuce = p >= target - 1 && c >= target - 1;
     const lead = Math.abs(p - c);
 
-    if ((p >= 11 || c >= 11) && lead >= 2) {
+    if ((p >= target || c >= target) && lead >= 2) {
       this.setState('GAME_OVER');
       this.eventBus.emit('match:over', { winner, score: { ...this.score } });
       return;
@@ -217,8 +264,10 @@ export class StateMachine {
     }
 
     // Delay before next serve
-    setTimeout(() => {
-      if (this.state !== 'GAME_OVER') {
+    this.cancelPendingServe();
+    this.nextServeTimer = window.setTimeout(() => {
+      this.nextServeTimer = null;
+      if (this.state === 'POINT_SCORED') {
         this.prepareService();
       }
     }, 1200);

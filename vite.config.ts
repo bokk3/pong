@@ -1,4 +1,7 @@
 import { defineConfig, Plugin } from 'vite';
+import { readFileSync } from 'node:fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string };
 
 interface PeerPresence {
   peerId: string;
@@ -31,12 +34,12 @@ function presenceDevPlugin(): Plugin {
   function cleanupStaleData(): void {
     const now = Date.now();
     for (const [id, peer] of activePeers.entries()) {
-      if (now - peer.lastSeen > 20000) {
+      if (now - peer.lastSeen > 40000) {
         activePeers.delete(id);
       }
     }
     for (const [id, room] of activeRooms.entries()) {
-      if (now - room.lastSeen > 25000) {
+      if (now - room.lastSeen > 50000) {
         activeRooms.delete(id);
       }
     }
@@ -163,12 +166,25 @@ function presenceDevPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [presenceDevPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
   server: {
     port: 3000,
     open: false
   },
   build: {
-    target: 'esnext'
+    target: 'es2020',
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Vendor libraries change rarely; split them out so returning players keep them cached across game updates
+        manualChunks: {
+          three: ['three'],
+          peerjs: ['peerjs']
+        }
+      }
+    }
   }
 });
 

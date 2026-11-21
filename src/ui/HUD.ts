@@ -127,7 +127,8 @@ export class HUD {
   public selectedGameMode: 'PONG' | 'CURVE' = 'PONG';
   private localRematchRequested: boolean = false;
   private remoteRematchRequested: boolean = false;
-  private matchmakingPollTimer: number | null = null;
+  private matchmakingSession: number = 0;
+  private mmTitleEl: HTMLElement;
   private isStartingMatch: boolean = false;
   private lobbyWsUnsubscribe: (() => void) | null = null;
 
@@ -146,6 +147,9 @@ export class HUD {
   public onReturnToMenu: (() => void) | null = null;
   public onSensitivityChange: ((val: number) => void) | null = null;
   public onToggleWebcam: (() => void) | null = null;
+  public onPauseRequest: (() => void) | null = null;
+
+  private curveTargetScore: number = 5;
 
   constructor() {
     this.eventBus = EventBus.get();
@@ -239,6 +243,7 @@ export class HUD {
 
     // Matchmaking Modal
     this.mmModalEl = document.getElementById('matchmaking-modal')!;
+    this.mmTitleEl = document.getElementById('mm-title')!;
     this.closeMmBtn = document.getElementById('close-mm-btn')!;
     this.cancelMmBtn = document.getElementById('cancel-mm-btn')!;
     this.nicknameInput = document.getElementById('player-nickname') as HTMLInputElement;
@@ -607,6 +612,13 @@ export class HUD {
       if (this.onReturnToMenu) this.onReturnToMenu();
     });
 
+    // In-game pause button (the only way to pause/quit on touch devices)
+    document.getElementById('hud-pause-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      (e.currentTarget as HTMLElement).blur();
+      if (this.onPauseRequest) this.onPauseRequest();
+    });
+
     // Corner Quick Settings Toggle
     const hudSettingsBtn = document.getElementById('hud-settings-btn');
     const hudSettingsCloseBtn = document.getElementById('hud-settings-close-btn');
@@ -648,18 +660,19 @@ export class HUD {
 
     this.eventBus.on('curve:round_start', ({ roundNumber }) => {
       this.rallyCounterEl.textContent = `ROUND ${roundNumber}`;
-      this.matchInfoEl.textContent = 'FIRST TO 5';
+      this.matchInfoEl.textContent = `FIRST TO ${this.curveTargetScore}`;
       this.showCallout(`ROUND ${roundNumber}`, 1100);
-      if (this.deviceDetector.info.isTouchDevice) {
-        if (this.curveTouchControlsEl) this.curveTouchControlsEl.style.display = 'flex';
-      }
+      this.setCurveTouchControls(true);
     });
 
-
     this.eventBus.on('curve:score', (score) => {
+      this.curveTargetScore = score.targetScore;
       this.playerScoreEl.textContent = String(score.player);
       this.cpuScoreEl.textContent = String(score.cpu);
       this.matchInfoEl.textContent = `FIRST TO ${score.targetScore}`;
+      // Curve has no serves; clear any leftover Pong serve highlight
+      this.playerCardEl.classList.remove('serving');
+      this.cpuCardEl.classList.remove('serving');
     });
 
     this.eventBus.on('curve:crash', ({ victim }) => {
@@ -672,19 +685,14 @@ export class HUD {
     });
 
     this.eventBus.on('curve:match_over', ({ winner, score }) => {
-      if (this.curveTouchControlsEl) this.curveTouchControlsEl.style.display = 'none';
-      const fakeMatchScore: MatchScore = {
-        player: score.player,
-        cpu: score.cpu,
-        server: 'PLAYER',
-        consecutiveServes: 0,
-        rallyCount: 0,
-        longestRally: Math.max(score.player, score.cpu),
-        smashWinners: 0,
-        totalPlayerShots: score.player + score.cpu,
-        goodOrBetterShots: score.player
-      };
-      this.showGameOver(winner, fakeMatchScore);
+      this.setCurveTouchControls(false);
+      const rounds = score.player + score.cpu;
+      this.showGameOver(winner, null, [
+        { value: `${score.player} - ${score.cpu}`, label: 'Final Score' },
+        { value: String(rounds), label: 'Rounds Played' },
+        { value: String(score.player), label: 'Rounds Survived' },
+        { value: `${rounds > 0 ? Math.round((score.player / rounds) * 100) : 0}%`, label: 'Survival Rate' }
+      ]);
     });
 
     this.eventBus.on('device:resize', () => {
@@ -842,87 +850,50 @@ export class HUD {
   }
 
   public closeMatchmaking(): void {
-    if (this.matchmakingPollTimer !== null) {
-      clearInterval(this.matchmakingPollTimer);
-      this.matchmakingPollTimer = null;
-    }
+    const wasOpen = this.mmModalEl.classList.contains('active');
+    this.matchmakingSession++; // cancels any running quick-match loop
     this.network.isSearching = false;
     this.isStartingMatch = false;
     this.mmModalEl.classList.remove('active');
-    if (!this.network.isConnected) {
+    if (wasOpen && !this.network.isConnected) {
+      // Player backed out: take any quick-match room off the public list
+      void this.network.closeLobbyRoom();
       this.network.reportPresence('menu');
     }
   }
 
   private async startQuickMatchmaking(): Promise<void> {
-    if (this.matchmakingPollTimer !== null) {
-      clearInterval(this.matchmakingPollTimer);
-      this.matchmakingPollTimer = null;
-    }
-
-    this.network.isSearching = true;
+    const session = ++this.matchmakingSession;
     this.isStartingMatch = false;
-    this.mmStatusTitleEl.textContent = 'Connecting to P2P network...';
-    this.mmStatusSubEl.textContent = 'Initializing PeerJS room...';
     this.mmPingValEl.textContent = '-- ms';
+    const modeLabel = this.selectedGameMode === 'CURVE' ? 'Curve Battle' : 'Classic Pong';
+    this.mmTitleEl.textContent = `QUICK MATCH · ${modeLabel.toUpperCase()}`;
 
-    // 1. Initialize peer FIRST so this.network.peer has its real ID
-    const myCode = await this.network.initPeer();
-    if (!this.mmModalEl.classList.contains('active')) return;
-
-    // 2. Announce locally via BroadcastChannel for multi-tab testing
-    this.network.broadcastLocalSearch();
-
-    // 3. Register real peer ID with presence queue
-    this.mmStatusTitleEl.textContent = 'Scanning for opponents...';
-    this.mmStatusSubEl.textContent = 'Looking for active players...';
-    const presenceData = await this.network.reportPresence('searching');
-
-    // 4. Try candidates if any exist
-    const myPeerId = this.network.peer?.id;
-    const candidates = (presenceData?.candidates || []).filter(c => c.peerId !== myPeerId);
-
-    if (candidates.length > 0) {
-      this.mmStatusSubEl.textContent = `Found ${candidates.length} candidate(s). Connecting...`;
-      const matched = await this.network.findBestCandidateMatch(candidates);
-      if (matched) {
-        this.mmStatusTitleEl.textContent = 'Opponent Found!';
-        this.mmStatusSubEl.textContent = 'Opening direct WebRTC channel...';
-        return;
-      }
-    }
-
-    // 5. If no candidates, host and poll
-    this.mmStatusTitleEl.textContent = 'Waiting for Challenger...';
-    this.mmStatusSubEl.textContent = `Hosting room [${myCode.toUpperCase()}]. Waiting for match...`;
-
-    // Start polling presence while waiting
-    this.matchmakingPollTimer = window.setInterval(async () => {
-      if (this.network.isConnected || !this.mmModalEl.classList.contains('active')) {
-        if (this.matchmakingPollTimer !== null) {
-          clearInterval(this.matchmakingPollTimer);
-          this.matchmakingPollTimer = null;
-        }
-        return;
-      }
-
-      this.network.broadcastLocalSearch();
-      const updated = await this.network.reportPresence('searching');
-      const newCandidates = (updated?.candidates || []).filter(c => c.peerId !== this.network.peer?.id);
-      if (newCandidates.length > 0 && !this.network.isConnected) {
-        const matched = await this.network.findBestCandidateMatch(newCandidates);
-        if (matched && this.matchmakingPollTimer !== null) {
-          clearInterval(this.matchmakingPollTimer);
-          this.matchmakingPollTimer = null;
-        }
-      }
-    }, 2000);
+    const isCancelled = () => session !== this.matchmakingSession || !this.mmModalEl.classList.contains('active');
+    await this.network.quickMatch(
+      this.selectedGameMode,
+      (title, sub) => {
+        if (isCancelled()) return;
+        this.mmStatusTitleEl.textContent = title;
+        this.mmStatusSubEl.textContent = sub;
+      },
+      isCancelled
+    );
   }
 
   private async startFriendRoomHosting(): Promise<void> {
+    this.mmTitleEl.textContent = 'PLAY WITH A FRIEND';
     this.displayRoomCodeEl.textContent = '...';
-    const code = await this.network.initPeer();
-    this.displayRoomCodeEl.textContent = code.toUpperCase();
+    // A private room hosts whichever mode is selected in the main menu
+    this.network.activeGameMode = this.selectedGameMode;
+    this.network.hostedTargetScore = this.selectedGameMode === 'CURVE' ? 5 : 11;
+    try {
+      const code = await this.network.initPeer();
+      this.displayRoomCodeEl.textContent = code.toUpperCase();
+    } catch {
+      this.displayRoomCodeEl.textContent = 'OFFLINE';
+      this.showCallout('COULD NOT REACH THE MATCH SERVER', 2200);
+    }
   }
 
   private updateControlsHint(): void {
@@ -1032,13 +1003,31 @@ export class HUD {
 
   public hideMainMenu(): void {
     this.mainMenuEl.classList.remove('active');
+    this.controlsSidebarEl.classList.remove('open');
+    // Drop focus from the (now hidden) menu button so Space doesn't "click" it again mid-match
+    (document.activeElement as HTMLElement | null)?.blur?.();
   }
 
-  public showPauseMenu(show: boolean): void {
-    if (show) {
-      this.pauseMenuEl.classList.add('active');
-    } else {
-      this.pauseMenuEl.classList.remove('active');
+  /** `isOnline`: the match keeps running for the opponent, so the menu must not claim the game is paused. */
+  public showPauseMenu(show: boolean, isOnline: boolean = false): void {
+    this.pauseMenuEl.classList.toggle('active', show);
+    if (!show) return;
+    const tagline = document.getElementById('pause-tagline');
+    if (tagline) {
+      tagline.textContent = isOnline
+        ? 'Online match is still running — press ESC to return'
+        : 'Game is paused — press ESC to resume';
+    }
+    const title = this.pauseMenuEl.querySelector('.result-title');
+    if (title) title.textContent = isOnline ? 'MENU' : 'PAUSED';
+    // Restarting an online match needs both players, which the game-over rematch flow handles
+    this.pauseRestartBtn.style.display = isOnline ? 'none' : '';
+    this.pauseMenuBtn.textContent = isOnline ? 'LEAVE MATCH' : 'MAIN MENU';
+  }
+
+  public setCurveTouchControls(show: boolean): void {
+    if (this.curveTouchControlsEl) {
+      this.curveTouchControlsEl.style.display = show && this.deviceDetector.info.isTouchDevice ? 'flex' : 'none';
     }
   }
 
@@ -1074,12 +1063,13 @@ export class HUD {
 
     this.rallyCounterEl.textContent = `RALLY: ${score.rallyCount}`;
 
-    if (score.player >= 10 && score.cpu >= 10) {
-      this.matchInfoEl.textContent = 'DEUCE (WIN BY 2)';
-    } else if (score.player >= 10 || score.cpu >= 10) {
+    const matchPointAt = score.targetScore - 1;
+    if (score.player >= matchPointAt && score.cpu >= matchPointAt) {
+      this.matchInfoEl.textContent = score.player === score.cpu ? 'DEUCE (WIN BY 2)' : 'ADVANTAGE';
+    } else if (score.player >= matchPointAt || score.cpu >= matchPointAt) {
       this.matchInfoEl.textContent = 'MATCH POINT';
     } else {
-      this.matchInfoEl.textContent = 'FIRST TO 11';
+      this.matchInfoEl.textContent = `FIRST TO ${score.targetScore}`;
     }
   }
 
@@ -1140,22 +1130,36 @@ export class HUD {
     }, duration);
   }
 
-  public showGameOver(winner: PlayerId, score: MatchScore): void {
+  /** Pass a Pong `score`, or `null` plus four custom stat tiles (used by Curve Battle). */
+  public showGameOver(winner: PlayerId, score: MatchScore | null, customStats?: Array<{ value: string; label: string }>): void {
     const isPlayerWin = winner === 'PLAYER';
+    const isCurve = score === null;
     this.resultTitleEl.textContent = isPlayerWin ? 'VICTORY!' : 'DEFEAT';
     this.resultTitleEl.className = `result-title ${isPlayerWin ? 'victory' : 'defeat'}`;
-    this.resultSubtitleEl.textContent = isPlayerWin
-      ? 'Spectacular match! You dominated the table!'
-      : 'Tough match! Hone your timing and challenge again!';
+    this.resultSubtitleEl.textContent = isCurve
+      ? (isPlayerWin ? 'Last one standing! Your lines held the arena.' : 'Boxed in! Watch the gaps and try again.')
+      : (isPlayerWin ? 'Spectacular match! You dominated the table!' : 'Tough match! Hone your timing and challenge again!');
 
-    this.statFinalScoreEl.textContent = `${score.player} - ${score.cpu}`;
-    this.statLongestRallyEl.textContent = String(score.longestRally);
-    this.statSmashWinnersEl.textContent = String(score.smashWinners);
-
-    const accuracy = score.totalPlayerShots > 0
-      ? Math.round((score.goodOrBetterShots / score.totalPlayerShots) * 100)
-      : 0;
-    this.statAccuracyEl.textContent = `${accuracy}%`;
+    let stats: Array<{ value: string; label: string }>;
+    if (score) {
+      const accuracy = score.totalPlayerShots > 0
+        ? Math.round((score.goodOrBetterShots / score.totalPlayerShots) * 100)
+        : 0;
+      stats = [
+        { value: `${score.player} - ${score.cpu}`, label: 'Final Score' },
+        { value: String(score.longestRally), label: 'Longest Rally' },
+        { value: String(score.smashWinners), label: 'Winners' },
+        { value: `${accuracy}%`, label: 'Timing Accuracy' }
+      ];
+    } else {
+      stats = customStats ?? [];
+    }
+    const valueEls = [this.statFinalScoreEl, this.statLongestRallyEl, this.statSmashWinnersEl, this.statAccuracyEl];
+    valueEls.forEach((el, i) => {
+      el.textContent = stats[i]?.value ?? '-';
+      const labelEl = el.parentElement?.querySelector('.stat-lbl');
+      if (labelEl && stats[i]) labelEl.textContent = stats[i].label;
+    });
 
     // Toggle Singleplayer vs Multiplayer Action buttons
     if (this.currentMode === 'MULTIPLAYER') {
@@ -1195,7 +1199,7 @@ export class HUD {
       this.renderLobbyRooms(rooms);
     });
 
-    // Start 3-second polling interval while browser is open
+    // Slow safety-net poll while the browser is open (the WebSocket above delivers changes live)
     if (this.lobbyPollTimer !== null) clearInterval(this.lobbyPollTimer);
     this.lobbyPollTimer = window.setInterval(async () => {
       if (!this.lobbyModalEl?.classList.contains('active')) {
@@ -1206,7 +1210,7 @@ export class HUD {
         return;
       }
       await this.refreshLobbyRooms();
-    }, 3000);
+    }, 15000);
   }
 
   public async closeLobbyBrowser(): Promise<void> {
@@ -1222,6 +1226,13 @@ export class HUD {
     }
     if (this.lobbyCreatePanelEl) {
       this.lobbyCreatePanelEl.style.display = 'none';
+    }
+    // Leaving the lobby while still waiting for a challenger cancels the hosted room
+    if (!this.network.isConnected && this.network.hostedRoomId) {
+      await this.network.closeLobbyRoom();
+    }
+    if (this.lobbyHostingViewEl) {
+      this.lobbyHostingViewEl.style.display = 'none';
     }
   }
 

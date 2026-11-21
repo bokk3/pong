@@ -22,7 +22,10 @@ export class DeviceDetector {
 
   private detect(): DeviceInfo {
     const ua = navigator.userAgent || '';
-    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    // Treat a device as touch-first only when its primary pointer is coarse (finger). Many Windows laptops
+    // report maxTouchPoints > 0 while being used with a mouse, so that alone must not switch the UI to touch hints.
+    const coarsePrimary = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const isTouch = coarsePrimary || (/Android|iPhone|iPad|iPod/i.test(ua) && navigator.maxTouchPoints > 0);
     const width = window.innerWidth;
     const height = window.innerHeight;
     const aspectRatio = width / (height || 1);
