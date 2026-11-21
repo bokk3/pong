@@ -20,12 +20,27 @@ const PRESENCE_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 8_000;
 const CONNECT_TIMEOUT_MS = 9_000;
 
-const STUN_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:global.stun.twilio.com:3478' }
+// Free public STUN servers (no relay; they just discover each player's public address).
+// Kept short: browsers slow down ICE gathering (and Firefox warns) with too many servers.
+const STUN_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.l.google.com:19302' }
 ];
+
+// TURN relay (Metered "Open Relay" free plan, hard-capped so it can never bill). Only used when a direct
+// connection is impossible (strict NAT, mobile carriers, corporate firewalls). This key can only fetch
+// relay credentials and is meant to be public in browser code; it must also stay in CSP connect-src.
+const TURN_CREDENTIALS_URL = 'https://truyens.metered.live/api/v1/turn/credentials?apiKey=97d7d915ac3f892523687af25b24cf8f51e6';
+const TURN_FETCH_TIMEOUT_MS = 4_000;
+// Used only if the credentials API is unreachable. If credentials are rotated in the Metered dashboard,
+// update these too (or remove them).
+const TURN_FALLBACK: RTCIceServer[] = [
+  'turn:global.relay.metered.ca:80',
+  'turn:global.relay.metered.ca:80?transport=tcp',
+  'turn:global.relay.metered.ca:443',
+  'turns:global.relay.metered.ca:443?transport=tcp'
+].map(urls => ({ urls, username: '01ece1d1286f2002236f4164', credential: 'V+UQ5Ewas7iiZNUW' }));
+const TURN_CACHE_MS = 30 * 60_000;
 
 const ALLOWED_TARGET_SCORES = [5, 11, 21];
 
@@ -217,13 +232,15 @@ export class NetworkManager {
       this.peer = null;
     }
 
+    const iceServers = await this.getIceServers();
+
     return new Promise((resolve, reject) => {
       const generatedId = cleanCustom
         ? `${PEER_PREFIX}${cleanCustom}`
         : `${PEER_PREFIX}${Math.random().toString(36).substring(2, 7)}`;
 
       const peer = new Peer(generatedId, {
-        config: { iceServers: STUN_SERVERS },
+        config: { iceServers },
         debug: 0
       });
       this.peer = peer;
@@ -255,6 +272,44 @@ export class NetworkManager {
         }
       });
     });
+  }
+
+  private turnServers: RTCIceServer[] = [];
+  private turnFetchedAt: number = 0;
+
+  /**
+   * STUN plus, when reachable, the TURN relay. Never throws or blocks for long: if the relay
+   * provider is down or over quota, players still get direct (STUN-only) connections.
+   */
+  private async getIceServers(): Promise<RTCIceServer[]> {
+    if (this.turnServers.length === 0 || Date.now() - this.turnFetchedAt > TURN_CACHE_MS) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), TURN_FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(TURN_CREDENTIALS_URL, { signal: controller.signal, cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json() as unknown;
+          if (Array.isArray(data)) {
+            const turn = data.filter((s): s is RTCIceServer => {
+              if (!s || typeof s !== 'object') return false;
+              const urls = (s as RTCIceServer).urls;
+              const list = Array.isArray(urls) ? urls : [urls];
+              // Keep only relay entries; our own STUN list already covers discovery
+              return list.length > 0 && list.every(u => typeof u === 'string' && /^turns?:/.test(u));
+            });
+            if (turn.length > 0) {
+              this.turnServers = turn;
+              this.turnFetchedAt = Date.now();
+            }
+          }
+        }
+      } catch {
+        // timeout / offline / quota: fall back to STUN only
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return [...STUN_SERVERS, ...(this.turnServers.length > 0 ? this.turnServers : TURN_FALLBACK)];
   }
 
   private setupIncomingConnectionHandler(peer: Peer): void {
