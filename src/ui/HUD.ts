@@ -2,6 +2,7 @@ import { Difficulty, MatchScore, PlayerId, ShotInfo, MultiplayerRole, LobbyRoom,
 import { EventBus } from '../core/EventBus';
 import { NetworkManager } from '../network/NetworkManager';
 import { DeviceDetector } from '../utils/DeviceDetector';
+import { TiltController } from '../controllers/TiltController';
 
 export class HUD {
   private eventBus: EventBus;
@@ -148,6 +149,11 @@ export class HUD {
   public onSensitivityChange: ((val: number) => void) | null = null;
   public onToggleWebcam: (() => void) | null = null;
   public onPauseRequest: (() => void) | null = null;
+  public onToggleTilt: (() => void) | null = null;
+
+  private tiltToggleBtns: HTMLElement[] = [];
+  private tiltActive: boolean = false;
+  private curveControlsWanted: boolean = false;
 
   private curveTargetScore: number = 5;
 
@@ -395,6 +401,19 @@ export class HUD {
     this.webcamToggleBtn.addEventListener('click', triggerWebcam);
     this.menuWebcamToggleBtn.addEventListener('click', triggerWebcam);
     this.webcamCloseBtn.addEventListener('click', triggerWebcam);
+
+    // Tilt (gyro) toggles: only offered on touch devices with motion sensor support
+    this.tiltToggleBtns = ['menu-tilt-toggle-btn', 'tilt-toggle-btn']
+      .map(id => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
+    const offerTilt = TiltController.isSupported() && this.deviceDetector.info.isTouchDevice;
+    this.tiltToggleBtns.forEach(btn => {
+      btn.hidden = !offerTilt;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.onToggleTilt) this.onToggleTilt();
+      });
+    });
 
     // Bot Match Button
     this.startBtn.addEventListener('click', () => {
@@ -913,6 +932,15 @@ export class HUD {
 
   private updateControlsHint(): void {
     if (!this.controlsHintEl) return;
+    if (this.tiltActive) {
+      this.controlsHintEl.innerHTML = this.selectedGameMode === 'CURVE'
+        ? `<div class="hint-item"><span class="key">📱 Tilt ← →</span> Steer</div>
+           <div class="hint-item"><span class="key">Jump Gaps</span> Survive!</div>`
+        : `<div class="hint-item"><span class="key">📱 Tilt</span> Move</div>
+           <div class="hint-item"><span class="key">Tap</span> or <span class="key">Flick phone</span> Swing</div>
+           <div class="hint-item"><span class="key">Swipe ↑ ↓</span> Spin</div>`;
+      return;
+    }
     if (this.selectedGameMode === 'CURVE') {
       if (this.deviceDetector.info.isTouchDevice) {
         this.controlsHintEl.innerHTML = `
@@ -1051,9 +1079,19 @@ export class HUD {
   }
 
   public setCurveTouchControls(show: boolean): void {
+    this.curveControlsWanted = show;
     if (this.curveTouchControlsEl) {
-      this.curveTouchControlsEl.style.display = show && this.deviceDetector.info.isTouchDevice ? 'flex' : 'none';
+      // Tilt replaces the on-screen steering buttons
+      const visible = show && this.deviceDetector.info.isTouchDevice && !this.tiltActive;
+      this.curveTouchControlsEl.style.display = visible ? 'flex' : 'none';
     }
+  }
+
+  public setTiltActive(active: boolean): void {
+    this.tiltActive = active;
+    this.tiltToggleBtns.forEach(btn => btn.classList.toggle('active', active));
+    this.setCurveTouchControls(this.curveControlsWanted);
+    this.updateControlsHint();
   }
 
   public isPauseMenuOpen(): boolean {
@@ -1062,6 +1100,15 @@ export class HUD {
 
   public showServePrompt(show: boolean): void {
     if (show) {
+      const isTouch = this.deviceDetector.info.isTouchDevice;
+      const text = this.servePromptEl.querySelector('.serve-text');
+      const sub = this.servePromptEl.querySelector('.serve-subtext');
+      if (text) text.textContent = isTouch ? 'TAP TO SERVE' : 'CLICK OR PRESS SPACE TO SERVE';
+      if (sub) {
+        sub.textContent = this.tiltActive
+          ? 'or flick your phone'
+          : isTouch ? 'Swipe up for a topspin serve' : 'Flick or swipe upward for topspin serve';
+      }
       this.servePromptEl.classList.add('active');
     } else {
       this.servePromptEl.classList.remove('active');

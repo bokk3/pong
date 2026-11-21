@@ -39,6 +39,8 @@ The host's browser referees the match (points, crashes, rounds), and the other p
 | Pause | ❚❚ button | `Esc` | ❚❚ button |
 | **Curve Battle:** turn | — | `A` / `←`, `D` / `→` | Left / right halves of the screen |
 
+**📱 Tilt mode (phones & tablets):** tap **Tilt** in the menu or the in-game ⚙️ settings. Tilt the device left/right to move the paddle or steer in Curve Battle; in Pong, tap, swipe or flick the phone to swing. "Level" is re-measured at every serve and round, so hold the phone however is comfortable. On iPhone, allow motion access when asked.
+
 Paddle sensitivity can be tuned in the menu or the ⚙️ in-game settings. There is also an experimental **webcam mode** (beta) that tracks your hand: swipe up for topspin and down for slice. Video never leaves your device.
 
 ---

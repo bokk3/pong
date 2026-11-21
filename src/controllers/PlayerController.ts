@@ -22,6 +22,8 @@ export class PlayerController {
   // Settings & Sensitivity
   public sensitivity: number = 1.2; // Default 1.2x (range 0.5x to 2.5x)
   public isWebcamMode: boolean = false;
+  /** Tilt (gyro) steers the paddle sideways; touches then only swing. */
+  public isTiltMode: boolean = false;
   public onPaddlePositionUpdate: ((x: number, y: number, z: number, isForehand: boolean, isSwinging: boolean) => void) | null = null;
 
   // Input tracking
@@ -79,9 +81,11 @@ export class PlayerController {
         this.touchStartTime = performance.now();
         this.lastTouchMoveTime = this.touchStartTime;
 
-        // Immediately update lateral paddle position on touch
-        const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
-        this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+        // Immediately update lateral paddle position on touch (unless tilt is steering)
+        if (!this.isTiltMode) {
+          const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
+          this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+        }
       }
     }, { passive: true });
 
@@ -101,9 +105,11 @@ export class PlayerController {
           this.touchVelocity.x = THREE.MathUtils.lerp(this.touchVelocity.x, dx / dt, 0.5);
           this.touchVelocity.y = THREE.MathUtils.lerp(this.touchVelocity.y, dy / dt, 0.5);
 
-          // Update lateral position across baseline smoothly
-          const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
-          this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+          // Update lateral position across baseline smoothly (unless tilt is steering)
+          if (!this.isTiltMode) {
+            const screenNormX = (touch.clientX / window.innerWidth - 0.5) * 2;
+            this.manualOffset.x = screenNormX * 0.65 * this.sensitivity;
+          }
 
           // Rapid upward / downward flick detection while dragging
           const flickSpeed = Math.hypot(this.touchVelocity.x, this.touchVelocity.y);
@@ -241,7 +247,7 @@ export class PlayerController {
   }
 
   public setExternalMotion(normX: number): void {
-    // normX in [-1, 1] from webcam hand tracking
+    // normX in [-1, 1] from webcam hand tracking or device tilt
     this.manualOffset.x = normX * 0.85 * this.sensitivity;
   }
 

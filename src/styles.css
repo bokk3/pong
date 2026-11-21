@@ -3437,3 +3437,49 @@ html {
     border-radius: 14px;
   }
 }
+
+/* Tilt (gyro) toggle: hidden unless the device has motion sensors (set from JS) */
+.tilt-toggle[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 600px) and (orientation: portrait), (max-width: 480px) {
+  .bottom-aux-actions {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+  }
+}
+
+/* Phones: the scoreboard spans the full width, so the pause/settings buttons sit just below it */
+@media (max-width: 640px), (orientation: portrait) and (max-width: 768px) {
+  #hud-settings-container {
+    top: calc(max(16px, env(safe-area-inset-top)) + 52px);
+    gap: 8px;
+  }
+
+  #hud-settings-container .hud-corner-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .hud-settings-dropdown {
+    top: 48px;
+  }
+}
+
+/* Phones: the control hint wraps instead of running off-screen */
+@media (max-width: 640px) {
+  #controls-hint {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    max-width: calc(100% - 24px);
+    border-radius: 16px;
+    margin-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+
+  .hint-item {
+    white-space: nowrap;
+  }
+}

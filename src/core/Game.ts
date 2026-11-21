@@ -6,6 +6,7 @@ import { Paddle } from '../entities/Paddle';
 import { PlayerController } from '../controllers/PlayerController';
 import { AIController } from '../controllers/AIController';
 import { WebcamController } from '../controllers/WebcamController';
+import { TiltController } from '../controllers/TiltController';
 import { CameraController } from '../vfx/CameraController';
 import { VFXManager } from '../vfx/VFXManager';
 import { SoundEngine } from '../audio/SoundEngine';
@@ -57,6 +58,8 @@ export class Game {
   private isRunning: boolean = false;
   private isPaused: boolean = false;
   private botDifficulty: Difficulty = 'pro';
+  private tilt: TiltController = new TiltController();
+  private tiltCurveDir: -1 | 0 | 1 = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -163,21 +166,40 @@ export class Game {
     window.addEventListener('pointerdown', () => this.sound.init(), { once: true });
     window.addEventListener('keydown', () => this.sound.init(), { once: true });
 
-    // Sensitivity control
+    // Sensitivity control (1.2x is the default; tilt treats that as 1.0)
     this.hud.onSensitivityChange = (sens) => {
       this.playerCtrl.sensitivity = sens;
+      this.tilt.sensitivity = sens / 1.2;
     };
+
+    // Tilt (gyro) controls for phones & tablets
+    this.hud.onToggleTilt = () => {
+      void this.setTiltEnabled(!this.tilt.isEnabled);
+    };
+    // Flick the phone to swing (Pong)
+    this.tilt.onFlick = () => {
+      if (this.gameModeType !== 'PONG' || this.isPaused) return;
+      if (this.stateMachine.state === 'SERVE_WAIT' && this.isLocalPlayerTurnToServe()) {
+        this.playerCtrl.executeServe();
+      } else if (this.stateMachine.state === 'RALLY') {
+        this.playerCtrl.triggerExternalStrike('TOPSPIN', 1.2, false);
+      }
+    };
+    // Re-enable tilt for returning players on their first tap (iOS needs a gesture for the permission)
+    if (this.readTiltPreference() && TiltController.isSupported()) {
+      window.addEventListener('pointerdown', () => { void this.setTiltEnabled(true, true); }, { once: true });
+    }
+    // "Level" is wherever the player is holding the phone at the start of each round
+    this.eventBus.on('curve:round_start', () => this.tilt.calibrate());
 
     // Webcam mode toggle
     this.hud.onToggleWebcam = async () => {
       if (this.playerCtrl.isWebcamMode) {
-        this.webcamCtrl.stop();
-        this.playerCtrl.isWebcamMode = false;
-        this.hud.setWebcamActive(false);
-        const { video } = this.hud.getWebcamElements();
-        video.srcObject = null;
+        this.stopWebcam();
         this.hud.showCallout('MOUSE CONTROLS ACTIVE', 1200);
       } else {
+        // Webcam and tilt both drive the paddle; only one at a time
+        if (this.tilt.isEnabled) this.setTiltEnabled(false, true);
         this.hud.setWebcamActive(true);
         const { video, overlay } = this.hud.getWebcamElements();
         this.webcamCtrl.setOverlayCanvas(overlay);
@@ -277,6 +299,7 @@ export class Game {
     // State Changes
     this.eventBus.on('state:changed', ({ to }) => {
       if (to === 'SERVE_WAIT') {
+        this.tilt.calibrate();
         const canServe = this.isLocalPlayerTurnToServe();
         this.hud.showServePrompt(canServe);
         if (!canServe && this.mode === 'BOT') {
@@ -490,6 +513,89 @@ export class Game {
     this.stadium.group.visible = true;
   }
 
+  private stopWebcam(): void {
+    this.webcamCtrl.stop();
+    this.playerCtrl.isWebcamMode = false;
+    this.hud.setWebcamActive(false);
+    const { video } = this.hud.getWebcamElements();
+    video.srcObject = null;
+  }
+
+  private readTiltPreference(): boolean {
+    try {
+      return localStorage.getItem('spinpong_tilt') === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  private saveTiltPreference(on: boolean): void {
+    try {
+      localStorage.setItem('spinpong_tilt', on ? '1' : '0');
+    } catch {
+      // storage unavailable
+    }
+  }
+
+  /** `silent`: no callouts (used for auto-restore and when switching to webcam). */
+  private async setTiltEnabled(on: boolean, silent: boolean = false): Promise<void> {
+    if (!on) {
+      this.tilt.disable();
+      this.playerCtrl.isTiltMode = false;
+      if (this.tiltCurveDir !== 0) {
+        this.tiltCurveDir = 0;
+        if (this.gameModeType === 'CURVE') this.curveMode.handleLocalSteering(0);
+      }
+      this.hud.setTiltActive(false);
+      if (!silent) {
+        this.saveTiltPreference(false);
+        this.hud.showCallout('TOUCH CONTROLS ACTIVE', 1200);
+      }
+      return;
+    }
+
+    if (this.playerCtrl.isWebcamMode) this.stopWebcam();
+
+    const result = await this.tilt.enable();
+    if (result === 'ok') {
+      this.playerCtrl.isTiltMode = true;
+      this.hud.setTiltActive(true);
+      this.saveTiltPreference(true);
+      if (!silent) {
+        this.hud.showCallout(this.gameModeType === 'CURVE' ? '📱 TILT TO STEER' : '📱 TILT TO MOVE · TAP OR FLICK TO SWING', 2000);
+      }
+    } else {
+      this.hud.setTiltActive(false);
+      if (!silent) {
+        this.hud.showCallout(result === 'denied' ? 'MOTION ACCESS WAS DENIED' : 'NO MOTION SENSOR ON THIS DEVICE', 2200);
+      }
+    }
+  }
+
+  /** Called every frame while tilt is on. */
+  private applyTiltInput(): void {
+    if (!this.tilt.isEnabled || this.isPaused) return;
+    const v = this.tilt.value;
+
+    if (this.gameModeType === 'PONG') {
+      this.playerCtrl.setExternalMotion(v);
+      return;
+    }
+
+    // Curve: dead zone + hysteresis so the line doesn't flicker between straight and turning
+    let dir = this.tiltCurveDir;
+    if (dir === 0) {
+      if (v > 0.3) dir = 1;
+      else if (v < -0.3) dir = -1;
+    } else if (Math.abs(v) < 0.18 || Math.sign(v) !== dir) {
+      dir = 0;
+    }
+    if (dir !== this.tiltCurveDir) {
+      this.tiltCurveDir = dir;
+      this.curveMode.handleLocalSteering(dir);
+    }
+  }
+
   private isInMatch(): boolean {
     const state = this.stateMachine.state;
     return state !== 'MENU' && state !== 'GAME_OVER';
@@ -545,6 +651,7 @@ export class Game {
   }
 
   private startCurveMatch(isMultiplayer: boolean, diff: Difficulty = 'pro'): void {
+    this.tiltCurveDir = 0;
     this.gameModeType = 'CURVE';
     this.setEntitiesVisibility(false); // Hides ping pong table, net, paddles, ball, and wood floor (stadium crowd stays visible)
     this.curveMode.group.visible = true; // Shows plain square 2D arena
@@ -719,6 +826,7 @@ export class Game {
     if (this.gameModeType === 'CURVE') {
       // Curve Battle simulation loop
       if (this.stateMachine.state !== 'MENU') {
+        this.applyTiltInput();
         this.curveMode.update(rawDelta);
         this.vfx.update(rawDelta);
         // Audience stays active and tracks curve battle leader
@@ -746,6 +854,7 @@ export class Game {
 
     // Update Game Elements
     if (this.stateMachine.state !== 'MENU') {
+      this.applyTiltInput();
       this.playerCtrl.update(dt);
       if (this.mode === 'BOT') {
         this.aiCtrl.update(dt);
